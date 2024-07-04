@@ -113,8 +113,9 @@ func Run(ctx context.Context, o *options.Options) error {
 	}
 
 	controllerCtx := ctrlctx.Context{
-		Controllers: o.Controllers,
-		Manager:     manager,
+		Controllers:  o.Controllers,
+		Manager:      manager,
+		CRDRemoteURL: o.CRDRemoteURL,
 	}
 	if err := controllers.StartControllers(controllerCtx, controllersDisabledByDefault); err != nil {
 		klog.Errorf("Failed to start controllers: %v", err)
@@ -145,6 +146,7 @@ func startKarmadaController(ctx ctrlctx.Context) (bool, error) {
 		Config:        ctx.Manager.GetConfig(),
 		Client:        ctx.Manager.GetClient(),
 		EventRecorder: ctx.Manager.GetEventRecorderFor(karmada.ControllerName),
+		CRDRemoteURL:  ctx.CRDRemoteURL,
 	}
 	if err := ctrl.SetupWithManager(ctx.Manager); err != nil {
 		klog.ErrorS(err, "unable to setup with manager", "controller", karmada.ControllerName)

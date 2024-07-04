@@ -58,6 +58,9 @@ type Options struct {
 	MetricsBindAddress string
 	// ConcurrentKarmadaSyncs is the number of karmada objects that are allowed to sync concurrently.
 	ConcurrentKarmadaSyncs int
+	// By default, the operator will download CRDs from a well known location. CRDRemoteURL, when set,
+	// can be used to provide a custom location from which the CRDs should be downloaded.
+	CRDRemoteURL string
 }
 
 // NewOptions creates a new Options with a default config.
@@ -92,6 +95,8 @@ func (o *Options) AddFlags(fs *pflag.FlagSet, allControllers []string, disabledB
 		"named 'foo', '-foo' disables the controller named 'foo'.\nAll controllers: %s .\nDisabled-by-default controllers: %s .",
 		strings.Join(allControllers, ", "), strings.Join(disabledByDefaultControllers, ", ")))
 	fs.IntVar(&o.ConcurrentKarmadaSyncs, "concurrent-karmada-syncs", o.ConcurrentKarmadaSyncs, "The number of karmada objects that are allowed to sync concurrently.")
+	fs.StringVar(&o.CRDRemoteURL, "crd-remote-url", o.CRDRemoteURL, "By default, the operator will download CRDs from a well known location. This flag, when set,"+
+		" can be used to provide a custom location from which the CRDs should be downloaded.")
 	options.BindLeaderElectionFlags(&o.LeaderElection, fs)
 }
 

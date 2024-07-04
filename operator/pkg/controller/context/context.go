@@ -31,7 +31,8 @@ type Context struct {
 	// first item for a particular name wins
 	Controllers []string
 
-	Manager controllerruntime.Manager
+	Manager      controllerruntime.Manager
+	CRDRemoteURL string
 }
 
 // IsControllerEnabled checks if the context's controllers enabled or not

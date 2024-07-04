@@ -18,6 +18,7 @@ package karmada
 
 import (
 	"context"
+	operator "github.com/karmada-io/karmada/operator/pkg"
 	"reflect"
 	"strconv"
 	"time"
@@ -55,6 +56,7 @@ type Controller struct {
 	client.Client
 	Config        *rest.Config
 	EventRecorder record.EventRecorder
+	CRDRemoteURL  string
 }
 
 // Reconcile performs a full reconciliation for the object referred to by the Request.
@@ -98,7 +100,10 @@ func (ctrl *Controller) Reconcile(ctx context.Context, req controllerruntime.Req
 
 func (ctrl *Controller) syncKarmada(karmada *operatorv1alpha1.Karmada) error {
 	klog.V(2).InfoS("Reconciling karmada", "name", karmada.Name)
-	planner, err := NewPlannerFor(karmada, ctrl.Client, ctrl.Config)
+	initOps := func(o *operator.InitOptions) {
+		o.CRDRemoteURL = ctrl.CRDRemoteURL
+	}
+	planner, err := NewPlannerFor(karmada, ctrl.Client, ctrl.Config, initOps)
 	if err != nil {
 		return err
 	}
