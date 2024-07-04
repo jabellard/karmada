@@ -101,7 +101,9 @@ func (ctrl *Controller) Reconcile(ctx context.Context, req controllerruntime.Req
 func (ctrl *Controller) syncKarmada(karmada *operatorv1alpha1.Karmada) error {
 	klog.V(2).InfoS("Reconciling karmada", "name", karmada.Name)
 	initOps := func(o *operator.InitOptions) {
-		o.CRDRemoteURL = ctrl.CRDRemoteURL
+		if len(ctrl.CRDRemoteURL) > 0 {
+			o.CRDRemoteURL = ctrl.CRDRemoteURL
+		}
 	}
 	planner, err := NewPlannerFor(karmada, ctrl.Client, ctrl.Config, initOps)
 	if err != nil {

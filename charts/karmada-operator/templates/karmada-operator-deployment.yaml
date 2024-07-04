@@ -33,15 +33,18 @@ spec:
     spec:
       {{- include "karmada.operator.imagePullSecrets" . | indent 6 }}
       containers:
-      - name: {{ include "karmada.operator.fullname" . }}
-        image: {{ template "karmada.operator.image" . }}
-        imagePullPolicy: {{ .Values.operator.image.pullPolicy }}
-        command:
-        - /bin/karmada-operator
-        - --leader-elect-resource-namespace={{ .Release.Namespace }}
-        - --v=2
+        - name: {{ include "karmada.operator.fullname" . }}
+          image: {{ template "karmada.operator.image" . }}
+          imagePullPolicy: {{ .Values.operator.image.pullPolicy }}
+          command:
+            - /bin/karmada-operator
+            - --leader-elect-resource-namespace={{ .Release.Namespace }}
+            - --v=2
+        {{- if .Values.operator.crdRemoteURL }}
+            - --crd-remote-url={{ .Values.operator.crdRemoteURL }}
+        {{- end }}
         {{- if .Values.operator.resources }}
-        resources: {{- toYaml .Values.operator.resources | nindent 12 }}
+          resources: {{- toYaml .Values.operator.resources | nindent 12 }}
         {{- end }}
       serviceAccountName: {{ include "karmada.operator.fullname" . }}
       {{- if .Values.operator.affinity }}

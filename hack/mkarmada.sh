@@ -106,17 +106,30 @@ EOF
 
     echo "alias $MANAGEMENT_CLUSTER_NAME='kubectl --kubeconfig=$kubeconfig_path'" >> "$KARMADARC_FILE"
 
-    echo "Building Karmada operator image..."
-    export VERSION="latest"
-    export REGISTRY="docker.io/karmada"
-    make image-karmada-operator GOOS="linux" --directory="${ROOT_DIR}"
+    IMAGES=(
+        "karmada-operator"
+        "karmada-controller-manager"
+        "karmada-scheduler"
+        "karmada-webhook"
+        "karmada-aggregated-apiserver"
+        "karmada-metrics-adapter"
+    )
 
-    echo "Loading Karmada operator image into kind cluster..."
-    #kind load docker-image "${REGISTRY}/karmada-operator:${VERSION}" --name="${MANAGEMENT_CLUSTER_NAME}"
+    export VERSION="v1.10.2"
+    export REGISTRY="docker.io/karmada"
+    for image in "${IMAGES[@]}"; do
+        echo "Building ${image} image..."
+        make image-"${image}" GOOS="linux" --directory="${ROOT_DIR}"
+    done
+
+    for image in "${IMAGES[@]}"; do
+        echo "loading ${image} image into the management cluster..."
+        kind load docker-image "${REGISTRY}/${image}:${VERSION}" --name="${MANAGEMENT_CLUSTER_NAME}"
+    done
 
 
     echo "Installing Karmada operator..."
-    helm dependency update "$ROOT_DIR/charts/karmada-operator"
+    #helm dependency update "$ROOT_DIR/charts/karmada-operator"
     helm install karmada-operator --create-namespace "$ROOT_DIR/charts/karmada-operator" \
         --namespace karmada-system \
         --kubeconfig "$kubeconfig_path"
@@ -174,19 +187,19 @@ spec:
       serviceType: NodePort
     karmadaAggregatedAPIServer:
       imageRepository: docker.io/karmada/karmada-aggregated-apiserver
-      imageTag: latest
+      imageTag: v1.10.2
     karmadaControllerManager:
       imageRepository: docker.io/karmada/karmada-controller-manager
-      imageTag: latest
+      imageTag: v1.10.2
     karmadaMetricsAdapter:
       imageRepository: docker.io/karmada/karmada-metrics-adapter
-      imageTag: latest
+      imageTag: v1.10.2
     karmadaScheduler:
       imageRepository: docker.io/karmada/karmada-scheduler
-      imageTag: latest
+      imageTag: v1.10.2
     karmadaWebhook:
       imageRepository: docker.io/karmada/karmada-webhook
-      imageTag: latest
+      imageTag: v1.10.2
 EOF
 )
 

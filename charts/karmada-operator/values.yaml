@@ -46,7 +46,7 @@ operator:
   image:
     registry: docker.io
     repository: karmada/karmada-operator
-    tag: latest
+    tag: v1.10.2
     ## Specify a imagePullPolicy
     ## Defaults to 'Always' if image tag is 'latest', else set to 'IfNotPresent'
     ##
@@ -80,3 +80,8 @@ operator:
     rollingUpdate:
       maxUnavailable: 0
       maxSurge: 50%
+
+  ## @param crdRemoteURL custom location where the CRD tarball should be downloaded
+  ## By default, the operator will download CRDs from a well known location. This flag, when set,
+  ## can be used to provide a custom location from which the CRDs should be downloaded.
+  #crdRemoteURL: https://github.com/karmada-io/karmada/releases/download/v1.10.2/crds.tar.gz
