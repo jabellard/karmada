@@ -31,6 +31,9 @@ if [[ "${KARMADA_TRACE:-}" || "$TRACE_FLAG_SET" == true ]]; then
     set -o xtrace
 fi
 
+export VERSION="v1.9.0"
+export REGISTRY="docker.io/karmada"
+
 ensure_prerequisites_are_met() {
     echo "Ensuring prerequisites are met..."
     if [[ $(uname -s) != "Darwin" ]]; then
@@ -106,17 +109,16 @@ EOF
 
     echo "alias $MANAGEMENT_CLUSTER_NAME='kubectl --kubeconfig=$kubeconfig_path'" >> "$KARMADARC_FILE"
 
+    git tag -d "${VERSION}" || git tag "${VERSION}"
     IMAGES=(
         "karmada-operator"
-        "karmada-controller-manager"
-        "karmada-scheduler"
-        "karmada-webhook"
-        "karmada-aggregated-apiserver"
-        "karmada-metrics-adapter"
+        #"karmada-controller-manager"
+        #"karmada-scheduler"
+        #"karmada-webhook"
+        #"karmada-aggregated-apiserver"
+        #"karmada-metrics-adapter"
     )
 
-    export VERSION="v1.10.2"
-    export REGISTRY="docker.io/karmada"
     for image in "${IMAGES[@]}"; do
         echo "Building ${image} image..."
         make image-"${image}" GOOS="linux" --directory="${ROOT_DIR}"
@@ -186,20 +188,20 @@ spec:
         - ${nic_ip}
       serviceType: NodePort
     karmadaAggregatedAPIServer:
-      imageRepository: docker.io/karmada/karmada-aggregated-apiserver
-      imageTag: v1.10.2
+      imageRepository: ${REGISTRY}/karmada/karmada-aggregated-apiserver
+      imageTag: ${VERSION}
     karmadaControllerManager:
-      imageRepository: docker.io/karmada/karmada-controller-manager
-      imageTag: v1.10.2
+      imageRepository: ${REGISTRY}/karmada/karmada-controller-manager
+      imageTag: ${VERSION}
     karmadaMetricsAdapter:
-      imageRepository: docker.io/karmada/karmada-metrics-adapter
-      imageTag: v1.10.2
+      imageRepository: ${REGISTRY}/karmada/karmada-metrics-adapter
+      imageTag: ${VERSION}
     karmadaScheduler:
-      imageRepository: docker.io/karmada/karmada-scheduler
-      imageTag: v1.10.2
+      imageRepository: ${REGISTRY}/karmada/karmada-scheduler
+      imageTag: ${VERSION}
     karmadaWebhook:
-      imageRepository: docker.io/karmada/karmada-webhook
-      imageTag: v1.10.2
+      imageRepository: ${REGISTRY}/karmada/karmada-webhook
+      imageTag: ${VERSION}
 EOF
 )
 
