@@ -46,7 +46,7 @@ operator:
   image:
     registry: docker.io
     repository: karmada/karmada-operator
-    tag: v1.9.0
+    tag: latest
     ## Specify a imagePullPolicy
     ## Defaults to 'Always' if image tag is 'latest', else set to 'IfNotPresent'
     ##

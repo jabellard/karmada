@@ -112,11 +112,11 @@ EOF
     git tag -d "${VERSION}" || git tag "${VERSION}"
     IMAGES=(
         "karmada-operator"
-        #"karmada-controller-manager"
-        #"karmada-scheduler"
-        #"karmada-webhook"
-        #"karmada-aggregated-apiserver"
-        #"karmada-metrics-adapter"
+        "karmada-controller-manager"
+        "karmada-scheduler"
+        "karmada-webhook"
+        "karmada-aggregated-apiserver"
+        "karmada-metrics-adapter"
     )
 
     for image in "${IMAGES[@]}"; do
@@ -132,8 +132,10 @@ EOF
 
     echo "Installing Karmada operator..."
     #helm dependency update "$ROOT_DIR/charts/karmada-operator"
-    helm install karmada-operator --create-namespace "$ROOT_DIR/charts/karmada-operator" \
+    helm install karmada-operator  "$ROOT_DIR/charts/karmada-operator" \
+        --create-namespace \
         --namespace karmada-system \
+        --set operator.image.tag="$VERSION" \
         --kubeconfig "$kubeconfig_path"
 
     touch "$CLUSTERS_FILE"
