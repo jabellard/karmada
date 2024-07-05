@@ -109,12 +109,6 @@ EOF
 
     echo "alias $MANAGEMENT_CLUSTER_NAME='kubectl --kubeconfig=$kubeconfig_path'" >> "$KARMADARC_FILE"
 
-    if git rev-parse "$VERSION" >/dev/null 2>&1; then
-      echo "Tag already exists. Deleting it..."
-      git tag -d "$VERSION"
-    fi
-
-    git tag "$VERSION"
     IMAGES=(
         "karmada-operator"
         #"karmada-controller-manager"
@@ -124,6 +118,14 @@ EOF
         #"karmada-metrics-adapter"
     )
 
+    GIT_VERSION="$VERSION"
+    GIT_COMMIT=$(git rev-parse HEAD)
+    GIT_TREE_STATE="clean"
+    BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
+    export LDFLAGS="-X github.com/karmada-io/karmada/pkg/version.gitVersion=${GIT_VERSION} \
+                    -X github.com/karmada-io/karmada/pkg/version.gitCommit=${GIT_COMMIT} \
+                    -X github.com/karmada-io/karmada/pkg/version.gitTreeState=${GIT_TREE_STATE} \
+                    -X github.com/karmada-io/karmada/pkg/version.buildDate=${BUILD_DATE}"
     for image in "${IMAGES[@]}"; do
         echo "Building ${image} image..."
         make image-"${image}" GOOS="linux" --directory="${ROOT_DIR}"
