@@ -31,7 +31,7 @@ if [[ "${KARMADA_TRACE:-}" || "$TRACE_FLAG_SET" == true ]]; then
     set -o xtrace
 fi
 
-export VERSION="v1.10.2"
+export VERSION="v1.9.0"
 export REGISTRY="docker.io/karmada"
 
 ensure_prerequisites_are_met() {
@@ -117,11 +117,11 @@ EOF
     git tag "$VERSION"
     IMAGES=(
         "karmada-operator"
-        "karmada-controller-manager"
-        "karmada-scheduler"
-        "karmada-webhook"
-        "karmada-aggregated-apiserver"
-        "karmada-metrics-adapter"
+        #"karmada-controller-manager"
+        #"karmada-scheduler"
+        #"karmada-webhook"
+        #"karmada-aggregated-apiserver"
+        #"karmada-metrics-adapter"
     )
 
     for image in "${IMAGES[@]}"; do
