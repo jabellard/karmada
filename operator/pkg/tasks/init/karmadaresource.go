@@ -82,6 +82,8 @@ func runSystemNamespace(r workflow.RunData) error {
 		return errors.New("systemName task invoked with an invalid data struct")
 	}
 
+	klog.V(2).InfoS("[runSystemNamespace] Creating namespace", "namespace", constants.KarmadaSystemNamespace)
+
 	err := apiclient.CreateNamespace(data.KarmadaClient(), &corev1.Namespace{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: constants.KarmadaSystemNamespace,
@@ -91,7 +93,7 @@ func runSystemNamespace(r workflow.RunData) error {
 		return fmt.Errorf("failed to create namespace %s, err: %w", constants.KarmadaSystemNamespace, err)
 	}
 
-	klog.V(2).InfoS("[systemName] Successfully created karmada system namespace", "namespace", constants.KarmadaSystemNamespace, "karmada", klog.KObj(data))
+	klog.V(2).InfoS("[runSystemNamespace] Successfully created Karmada system namespace", "namespace", constants.KarmadaSystemNamespace, "karmada", klog.KObj(data))
 	return nil
 }
 
@@ -101,11 +103,11 @@ func runCrds(r workflow.RunData) error {
 		return errors.New("crds task invoked with an invalid data struct")
 	}
 
-	var (
-		crdsDir       = path.Join(data.DataDir(), data.KarmadaVersion())
-		crdsPath      = path.Join(crdsDir, "crds/bases")
-		crdsPatchPath = path.Join(crdsDir, "crds/patches")
-	)
+	crdsDir := getCrdsDir(data)
+	crdsPath := path.Join(crdsDir, "crds/bases")
+	crdsPatchPath := path.Join(crdsDir, "crds/patches")
+
+	klog.V(2).InfoS("[runCrds] Applying CRDs", "crdsPath", crdsPath, "crdsPatchPath", crdsPatchPath)
 
 	crdsClient, err := apiclient.NewCRDsClient(data.ControlplaneConfig())
 	if err != nil {
@@ -113,25 +115,28 @@ func runCrds(r workflow.RunData) error {
 	}
 
 	if err := createCrds(crdsClient, crdsPath); err != nil {
-		return fmt.Errorf("failed to create karmada crds, err: %w", err)
+		return fmt.Errorf("failed to create Karmada CRDs, err: %w", err)
 	}
 
 	cert := data.GetCert(constants.CaCertAndKeyName)
 	if len(cert.CertData()) == 0 {
-		return errors.New("unexpected empty ca cert data")
+		return errors.New("unexpected empty CA cert data")
 	}
 
 	caBase64 := base64.StdEncoding.EncodeToString(cert.CertData())
 	if err := patchCrds(crdsClient, crdsPatchPath, caBase64); err != nil {
-		return fmt.Errorf("failed to patch karmada crds, err: %w", err)
+		return fmt.Errorf("failed to patch Karmada CRDs, err: %w", err)
 	}
 
-	klog.V(2).InfoS("[systemName] Successfully applied karmada crds resource", "karmada", klog.KObj(data))
+	klog.V(2).InfoS("[runCrds] Successfully applied Karmada CRDs resource", "karmada", klog.KObj(data))
 	return nil
 }
 
 func createCrds(crdsClient *crdsclient.Clientset, crdsPath string) error {
+	klog.V(2).InfoS("[createCrds] Creating CRDs from path", "path", crdsPath)
+
 	for _, file := range util.ListFileWithSuffix(crdsPath, ".yaml") {
+		klog.V(2).InfoS("[createCrds] Reading CRD file", "file", file.AbsPath)
 		crdBytes, err := util.ReadYamlFile(file.AbsPath)
 		if err != nil {
 			return err
@@ -139,9 +144,10 @@ func createCrds(crdsClient *crdsclient.Clientset, crdsPath string) error {
 
 		obj := apiextensionsv1.CustomResourceDefinition{}
 		if err := json.Unmarshal(crdBytes, &obj); err != nil {
-			klog.ErrorS(err, "error when converting json byte to apiExtensionsV1 CustomResourceDefinition struct")
+			klog.ErrorS(err, "error when converting JSON byte to apiExtensionsV1 CustomResourceDefinition struct")
 			return err
 		}
+		klog.V(2).InfoS("[createCrds] Creating CRD", "name", obj.Name)
 		if err := apiclient.CreateCustomResourceDefinitionIfNeed(crdsClient, &obj); err != nil {
 			return err
 		}
@@ -150,7 +156,10 @@ func createCrds(crdsClient *crdsclient.Clientset, crdsPath string) error {
 }
 
 func patchCrds(crdsClient *crdsclient.Clientset, patchPath string, caBundle string) error {
+	klog.V(2).InfoS("[patchCrds] Patching CRDs from path", "path", patchPath)
+
 	for _, file := range util.ListFileWithSuffix(patchPath, ".yaml") {
+		klog.V(2).InfoS("[patchCrds] Reading patch file", "file", file.AbsPath)
 		reg, err := regexp.Compile("{{caBundle}}")
 		if err != nil {
 			return err
@@ -161,8 +170,9 @@ func patchCrds(crdsClient *crdsclient.Clientset, patchPath string, caBundle stri
 			return err
 		}
 
-		crdResource := splitToCrdNameFormFile(file.Name(), "_", ".")
+		crdResource := splitToCrdNameFromFile(file.Name(), "_", ".")
 		name := crdResource + ".work.karmada.io"
+		klog.V(2).InfoS("[patchCrds] Patching CRD", "name", name)
 		if err := apiclient.PatchCustomResourceDefinition(crdsClient, name, crdBytes); err != nil {
 			return err
 		}
@@ -178,10 +188,12 @@ func runWebhookConfiguration(r workflow.RunData) error {
 
 	cert := data.GetCert(constants.CaCertAndKeyName)
 	if len(cert.CertData()) == 0 {
-		return errors.New("unexpected empty ca cert data for webhookConfiguration")
+		return errors.New("unexpected empty CA cert data for webhookConfiguration")
 	}
 
 	caBase64 := base64.StdEncoding.EncodeToString(cert.CertData())
+	klog.V(2).InfoS("[runWebhookConfiguration] Ensuring webhook configuration", "namespace", data.GetNamespace(), "name", data.GetName())
+
 	return webhookconfiguration.EnsureWebhookConfiguration(
 		data.KarmadaClient(),
 		data.GetNamespace(),
@@ -203,13 +215,15 @@ func runAPIService(r workflow.RunData) error {
 
 	cert := data.GetCert(constants.CaCertAndKeyName)
 	if len(cert.CertData()) == 0 {
-		return errors.New("unexpected empty ca cert data for aggregatedAPIService")
+		return errors.New("unexpected empty CA cert data for aggregatedAPIService")
 	}
 	caBase64 := base64.StdEncoding.EncodeToString(cert.CertData())
 
+	klog.V(2).InfoS("[runAPIService] Ensuring aggregated API service", "name", data.GetName(), "namespace", constants.KarmadaSystemNamespace)
+
 	err = apiservice.EnsureAggregatedAPIService(client, data.KarmadaClient(), data.GetName(), constants.KarmadaSystemNamespace, data.GetName(), data.GetNamespace(), caBase64)
 	if err != nil {
-		return fmt.Errorf("failed to apply aggregated APIService resource to karmada controlplane, err: %w", err)
+		return fmt.Errorf("failed to apply aggregated APIService resource to Karmada control plane, err: %w", err)
 	}
 
 	waiter := apiclient.NewKarmadaWaiter(config, nil, componentBeReadyTimeout)
@@ -217,11 +231,11 @@ func runAPIService(r workflow.RunData) error {
 		return fmt.Errorf("the APIService is unhealthy, err: %w", err)
 	}
 
-	klog.V(2).InfoS("[APIService] Aggregated APIService status is ready ", "karmada", klog.KObj(data))
+	klog.V(2).InfoS("[runAPIService] Aggregated APIService status is ready", "karmada", klog.KObj(data))
 	return nil
 }
 
-func splitToCrdNameFormFile(file string, start, end string) string {
+func splitToCrdNameFromFile(file string, start, end string) string {
 	index := strings.LastIndex(file, start)
 	crdName := file[index+1:]
 	index = strings.Index(crdName, end)

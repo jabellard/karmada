@@ -31,8 +31,10 @@ if [[ "${KARMADA_TRACE:-}" || "$TRACE_FLAG_SET" == true ]]; then
     set -o xtrace
 fi
 
-export VERSION="v1.9.0"
+export VERSION="v1.10.2"
 export REGISTRY="docker.io/karmada"
+#KARMADA_VERSION="v1.9.0"
+KARMADA_VERSION="$VERSION"
 
 ensure_prerequisites_are_met() {
     echo "Ensuring prerequisites are met..."
@@ -198,19 +200,19 @@ spec:
       serviceType: NodePort
     karmadaAggregatedAPIServer:
       imageRepository: ${REGISTRY}/karmada-aggregated-apiserver
-      imageTag: ${VERSION}
+      imageTag: ${KARMADA_VERSION}
     karmadaControllerManager:
       imageRepository: ${REGISTRY}/karmada-controller-manager
-      imageTag: ${VERSION}
+      imageTag: ${KARMADA_VERSION}
     karmadaMetricsAdapter:
       imageRepository: ${REGISTRY}/karmada-metrics-adapter
-      imageTag: ${VERSION}
+      imageTag: ${KARMADA_VERSION}
     karmadaScheduler:
       imageRepository: ${REGISTRY}/karmada-scheduler
-      imageTag: ${VERSION}
+      imageTag: ${KARMADA_VERSION}
     karmadaWebhook:
       imageRepository: ${REGISTRY}/karmada-webhook
-      imageTag: ${VERSION}
+      imageTag: ${KARMADA_VERSION}
 EOF
 )
 

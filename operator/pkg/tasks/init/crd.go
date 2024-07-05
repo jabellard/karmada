@@ -17,6 +17,8 @@ limitations under the License.
 package tasks
 
 import (
+	"crypto/md5"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -60,7 +62,7 @@ func runPrepareCrds(r workflow.RunData) error {
 		return errors.New("prepare-crds task invoked with an invalid data struct")
 	}
 
-	crdsDir := path.Join(data.DataDir(), data.KarmadaVersion())
+	crdsDir := getCrdsDir(data)
 	klog.V(4).InfoS("[prepare-crds] Running prepare-crds task", "karmada", klog.KObj(data))
 	klog.V(2).InfoS("[prepare-crds] Using crd folder", "folder", crdsDir, "karmada", klog.KObj(data))
 
@@ -73,16 +75,20 @@ func skipCrdsDownload(r workflow.RunData) (bool, error) {
 		return false, errors.New("prepare-crds task invoked with an invalid data struct")
 	}
 
-	crdsDir := path.Join(data.DataDir(), data.KarmadaVersion())
+	crdsDir := getCrdsDir(data)
+	klog.V(2).InfoS("[skipCrdsDownload] Checking if CRDs need to be downloaded", "folder", crdsDir)
+
 	if exist, err := util.PathExists(crdsDir); !exist || err != nil {
+		klog.V(2).InfoS("[skipCrdsDownload] CRDs directory does not exist or an error occurred", "folder", crdsDir, "error", err)
 		return false, err
 	}
 
 	if !existCrdsTar(crdsDir) {
+		klog.V(2).InfoS("[skipCrdsDownload] CRD tar file does not exist", "folder", crdsDir)
 		return false, nil
 	}
 
-	klog.V(2).InfoS("[download-crds] Skip download crd yaml files, the crd tar exists on disk", "karmada", klog.KObj(data))
+	klog.V(2).InfoS("[download-crds] Skip download CRD yaml files, the CRD tar exists on disk", "karmada", klog.KObj(data), "folder", crdsDir)
 	return true, nil
 }
 
@@ -92,31 +98,32 @@ func runCrdsDownload(r workflow.RunData) error {
 		return errors.New("download-crds task invoked with an invalid data struct")
 	}
 
-	var (
-		crdsDir     = path.Join(data.DataDir(), data.KarmadaVersion())
-		crdsTarPath = path.Join(crdsDir, crdsFileSuffix)
-	)
+	crdsDir := getCrdsDir(data)
+	crdsTarPath := path.Join(crdsDir, crdsFileSuffix)
+	klog.V(2).InfoS("[runCrdsDownload] Starting CRDs download", "folder", crdsDir, "remoteURL", data.CrdsRemoteURL())
 
 	exist, err := util.PathExists(crdsDir)
 	if err != nil {
 		return err
 	}
 	if !exist {
+		klog.V(2).InfoS("[runCrdsDownload] CRDs directory does not exist, creating it", "folder", crdsDir)
 		if err := os.MkdirAll(crdsDir, 0700); err != nil {
 			return err
 		}
 	}
 
 	if !existCrdsTar(crdsDir) {
+		klog.V(2).InfoS("[runCrdsDownload] CRD tar file does not exist, downloading", "remoteURL", data.CrdsRemoteURL(), "tarPath", crdsTarPath)
 		err := util.DownloadFile(data.CrdsRemoteURL(), crdsTarPath)
 		if err != nil {
-			return fmt.Errorf("failed to download crd tar, err: %w", err)
+			return fmt.Errorf("failed to download CRD tar, err: %w", err)
 		}
 	} else {
-		klog.V(2).InfoS("[download-crds] The crd tar exists on disk", "path", crdsDir, "karmada", klog.KObj(data))
+		klog.V(2).InfoS("[runCrdsDownload] The CRD tar exists on disk", "path", crdsDir)
 	}
 
-	klog.V(2).InfoS("[download-crds] Successfully downloaded crd package for remote url", "karmada", klog.KObj(data))
+	klog.V(2).InfoS("[runCrdsDownload] Successfully downloaded CRD package from remote URL", "remoteURL", data.CrdsRemoteURL(), "folder", crdsDir)
 	return nil
 }
 
@@ -126,33 +133,42 @@ func runUnpack(r workflow.RunData) error {
 		return errors.New("unpack task invoked with an invalid data struct")
 	}
 
-	var (
-		crdsDir     = path.Join(data.DataDir(), data.KarmadaVersion())
-		crdsTarPath = path.Join(crdsDir, crdsFileSuffix)
-		crdsPath    = path.Join(crdsDir, crdPathSuffix)
-	)
+	crdsDir := getCrdsDir(data)
+	crdsTarPath := path.Join(crdsDir, crdsFileSuffix)
+	crdsPath := path.Join(crdsDir, crdPathSuffix)
+	klog.V(2).InfoS("[runUnpack] Starting to unpack CRDs", "tarPath", crdsTarPath, "unpackDir", crdsDir)
 
-	// TODO: check whether crd yaml is valid.
 	exist, _ := util.PathExists(crdsPath)
 	if !exist {
+		klog.V(2).InfoS("[runUnpack] CRD yaml files do not exist, unpacking tar file", "unpackDir", crdsDir)
 		if err := util.Unpack(crdsTarPath, crdsDir); err != nil {
-			return fmt.Errorf("[unpack] failed to unpack crd tar, err: %w", err)
+			return fmt.Errorf("[unpack] failed to unpack CRD tar, err: %w", err)
 		}
 	} else {
-		klog.V(2).InfoS("[unpack] These crds yaml files have been decompressed in the path", "path", crdsPath, "karmada", klog.KObj(data))
+		klog.V(2).InfoS("[unpack] These CRDs yaml files have been decompressed in the path", "path", crdsPath, "karmada", klog.KObj(data))
 	}
 
-	klog.V(2).InfoS("[unpack] Successfully unpacked crd tar", "karmada", klog.KObj(data))
+	klog.V(2).InfoS("[unpack] Successfully unpacked CRD tar", "karmada", klog.KObj(data), "unpackDir", crdsDir)
 	return nil
 }
 
 func existCrdsTar(crdsDir string) bool {
 	files := util.ListFiles(crdsDir)
+	klog.V(2).InfoS("[existCrdsTar] Checking for CRD tar file in directory", "directory", crdsDir)
 
 	for _, file := range files {
+		klog.V(2).InfoS("[existCrdsTar] Checking file", "fileName", file.Name(), "fileSize", file.Size())
 		if strings.Contains(file.Name(), crdsFileSuffix) && file.Size() > 0 {
+			klog.V(2).InfoS("[existCrdsTar] Found CRD tar file", "fileName", file.Name(), "fileSize", file.Size())
 			return true
 		}
 	}
 	return false
+}
+
+func getCrdsDir(data InitData) string {
+	url := strings.TrimSpace(data.CrdsRemoteURL())
+	hash := md5.Sum([]byte(url))
+	hashStr := hex.EncodeToString(hash[:])
+	return path.Join(data.DataDir(), hashStr)
 }
