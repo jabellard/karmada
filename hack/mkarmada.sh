@@ -31,7 +31,7 @@ if [[ "${KARMADA_TRACE:-}" || "$TRACE_FLAG_SET" == true ]]; then
     set -o xtrace
 fi
 
-export VERSION="v1.9.0"
+export VERSION="v1.10.2"
 export REGISTRY="docker.io/karmada"
 
 ensure_prerequisites_are_met() {
