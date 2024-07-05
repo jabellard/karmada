@@ -195,19 +195,19 @@ spec:
         - ${nic_ip}
       serviceType: NodePort
     karmadaAggregatedAPIServer:
-      imageRepository: ${REGISTRY}/karmada/karmada-aggregated-apiserver
+      imageRepository: ${REGISTRY}/karmada-aggregated-apiserver
       imageTag: ${VERSION}
     karmadaControllerManager:
-      imageRepository: ${REGISTRY}/karmada/karmada-controller-manager
+      imageRepository: ${REGISTRY}/karmada-controller-manager
       imageTag: ${VERSION}
     karmadaMetricsAdapter:
-      imageRepository: ${REGISTRY}/karmada/karmada-metrics-adapter
+      imageRepository: ${REGISTRY}/karmada-metrics-adapter
       imageTag: ${VERSION}
     karmadaScheduler:
-      imageRepository: ${REGISTRY}/karmada/karmada-scheduler
+      imageRepository: ${REGISTRY}/karmada-scheduler
       imageTag: ${VERSION}
     karmadaWebhook:
-      imageRepository: ${REGISTRY}/karmada/karmada-webhook
+      imageRepository: ${REGISTRY}/karmada-webhook
       imageTag: ${VERSION}
 EOF
 )
