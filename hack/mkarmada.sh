@@ -109,7 +109,12 @@ EOF
 
     echo "alias $MANAGEMENT_CLUSTER_NAME='kubectl --kubeconfig=$kubeconfig_path'" >> "$KARMADARC_FILE"
 
-    git tag -d "${VERSION}" || git tag "${VERSION}"
+    if git rev-parse "$VERSION" >/dev/null 2>&1; then
+      echo "Tag already exists. Deleting it..."
+      git tag -d "$VERSION"
+    fi
+
+    git tag "$VERSION"
     IMAGES=(
         "karmada-operator"
         "karmada-controller-manager"
