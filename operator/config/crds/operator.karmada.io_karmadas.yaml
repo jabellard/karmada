@@ -1730,6 +1730,23 @@ spec:
                         type: object
                     type: object
                 type: object
+              crdDownloadPolicy:
+                default: IfNotPresent
+                description: |-
+                  Policy that should be used by the Karmada operator to retrieve the Karmada CRDs when provisioning this Karmada instance.
+                  Valid values are "Always" and "IfNotPresent".
+                  Defaults to "IfNotPresent".
+                enum:
+                - Always
+                - IfNotPresent
+                type: string
+              crdRemoteURL:
+                description: |-
+                  Custom URL that should be used to download required CRDs for this Karmada instance.
+                  Omit if the intent is to provision a new Karmada instance with control plane components of the same version as the operator's release version.
+                  In that scenario, the CRDs tarball will be downloaded from a release artifact on GitHub that's of the same version as the operator's release version.
+                  When that is not the intent, this field should be explicitly set to ensure the right version of the CRDs is installed for this Karmada instance.
+                type: string
               featureGates:
                 additionalProperties:
                   type: boolean
