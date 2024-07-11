@@ -44,6 +44,16 @@ type Karmada struct {
 	Status KarmadaStatus `json:"status,omitempty"`
 }
 
+// CRDDownloadPolicy specifies a policy for how the Karmada operator will retrieve the Karmada CRDs when provisioning a Karmada instance.
+type CRDDownloadPolicy string
+
+const (
+	// DownloadAlways instructs the Karmada operator to always download the CRDs tarball from a remote location.
+	DownloadAlways CRDDownloadPolicy = "Always"
+	// DownloadIfNotPresent instructs the Karmada operator to download the CRDs tarball from a remote location only if it is not yet present in the local cache.
+	DownloadIfNotPresent CRDDownloadPolicy = "IfNotPresent"
+)
+
 // KarmadaSpec is the specification of the desired behavior of the Karmada.
 type KarmadaSpec struct {
 	// HostCluster represents the cluster where to install the Karmada control plane.
@@ -72,6 +82,21 @@ type KarmadaSpec struct {
 	// More info: https://github.com/karmada-io/karmada/blob/master/pkg/features/features.go
 	// +optional
 	FeatureGates map[string]bool `json:"featureGates,omitempty"`
+
+	// Custom URL that should be used to download required CRDs for this Karmada instance.
+	// Omit if the intent is to provision a new Karmada instance with control plane components of the same version as the operator's release version.
+	// In that scenario, the CRDs tarball will be downloaded from a release artifact on GitHub that's of the same version as the operator's release version.
+	// When that is not the intent, this field should be explicitly set to ensure the right version of the CRDs is installed for this Karmada instance.
+	// +optional
+	CRDRemoteURL string `json:"crdRemoteURL,omitempty"`
+
+	// Policy that should be used by the Karmada operator to retrieve the Karmada CRDs when provisioning this Karmada instance.
+	// Valid values are "Always" and "IfNotPresent".
+	// Defaults to "IfNotPresent".
+	// +kubebuilder:validation:Enum=Always;IfNotPresent
+	// +kubebuilder:default=IfNotPresent
+	// +optional
+	CRDDownloadPolicy CRDDownloadPolicy `json:"crdDownloadPolicy,omitempty"`
 }
 
 // ImageRegistry represents an image registry as well as the
