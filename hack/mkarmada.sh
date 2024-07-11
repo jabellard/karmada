@@ -33,8 +33,8 @@ fi
 
 export VERSION="v1.10.2"
 export REGISTRY="docker.io/karmada"
-#KARMADA_VERSION="v1.9.0"
-KARMADA_VERSION="$VERSION"
+KARMADA_VERSION="v1.9.0"
+#KARMADA_VERSION="$VERSION"
 
 ensure_prerequisites_are_met() {
     echo "Ensuring prerequisites are met..."

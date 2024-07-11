@@ -36,6 +36,7 @@ type InitData interface {
 	KarmadaClient() clientset.Interface
 	DataDir() string
 	CrdsRemoteURL() string
+	CrdDownloadPolicy() operatorv1alpha1.CRDDownloadPolicy
 	KarmadaVersion() string
 	Components() *operatorv1alpha1.KarmadaComponents
 	FeatureGates() map[string]bool

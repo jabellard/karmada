@@ -57,7 +57,7 @@ type Planner struct {
 
 // NewPlannerFor creates planner, it will recognize the karmada resource action
 // and create different job.
-func NewPlannerFor(karmada *operatorv1alpha1.Karmada, c client.Client, config *rest.Config, initOpts operator.InitOpt) (*Planner, error) {
+func NewPlannerFor(karmada *operatorv1alpha1.Karmada, c client.Client, config *rest.Config) (*Planner, error) {
 	var job *workflow.Job
 
 	action := recognizeActionFor(karmada)
@@ -66,7 +66,6 @@ func NewPlannerFor(karmada *operatorv1alpha1.Karmada, c client.Client, config *r
 		opts := []operator.InitOpt{
 			operator.NewInitOptWithKarmada(karmada),
 			operator.NewInitOptWithKubeconfig(config),
-			initOpts,
 		}
 
 		options := operator.NewJobInitOptions(opts...)

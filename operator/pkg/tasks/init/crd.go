@@ -17,10 +17,11 @@ limitations under the License.
 package tasks
 
 import (
-	"crypto/md5"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	operatorv1alpha1 "github.com/karmada-io/karmada/operator/pkg/apis/operator/v1alpha1"
 	"os"
 	"path"
 	"strings"
@@ -75,6 +76,11 @@ func skipCrdsDownload(r workflow.RunData) (bool, error) {
 		return false, errors.New("prepare-crds task invoked with an invalid data struct")
 	}
 
+	if data.CrdDownloadPolicy() == operatorv1alpha1.DownloadAlways {
+		klog.V(2).InfoS("[skipCrdsDownload] CrdDownloadPolicy is 'Always', skipping download check")
+		return false, nil
+	}
+
 	crdsDir := getCrdsDir(data)
 	klog.V(2).InfoS("[skipCrdsDownload] Checking if CRDs need to be downloaded", "folder", crdsDir)
 
@@ -102,25 +108,30 @@ func runCrdsDownload(r workflow.RunData) error {
 	crdsTarPath := path.Join(crdsDir, crdsFileSuffix)
 	klog.V(2).InfoS("[runCrdsDownload] Starting CRDs download", "folder", crdsDir, "remoteURL", data.CrdsRemoteURL())
 
+	// Check if the CRDs directory exists
 	exist, err := util.PathExists(crdsDir)
 	if err != nil {
 		return err
 	}
-	if !exist {
-		klog.V(2).InfoS("[runCrdsDownload] CRDs directory does not exist, creating it", "folder", crdsDir)
-		if err := os.MkdirAll(crdsDir, 0700); err != nil {
-			return err
+
+	// If the CRDs directory exists, delete and recreate it
+	if exist {
+		klog.V(2).InfoS("[runCrdsDownload] CRDs directory exists, deleting and recreating it", "folder", crdsDir)
+		if err := os.RemoveAll(crdsDir); err != nil {
+			return fmt.Errorf("failed to delete CRDs directory, err: %w", err)
 		}
 	}
 
-	if !existCrdsTar(crdsDir) {
-		klog.V(2).InfoS("[runCrdsDownload] CRD tar file does not exist, downloading", "remoteURL", data.CrdsRemoteURL(), "tarPath", crdsTarPath)
-		err := util.DownloadFile(data.CrdsRemoteURL(), crdsTarPath)
-		if err != nil {
-			return fmt.Errorf("failed to download CRD tar, err: %w", err)
-		}
-	} else {
-		klog.V(2).InfoS("[runCrdsDownload] The CRD tar exists on disk", "path", crdsDir)
+	// Create the CRDs directory
+	klog.V(2).InfoS("[runCrdsDownload] Creating CRDs directory", "folder", crdsDir)
+	if err := os.MkdirAll(crdsDir, 0700); err != nil {
+		return fmt.Errorf("failed to create CRDs directory, err: %w", err)
+	}
+
+	// Download the CRD tar file
+	klog.V(2).InfoS("[runCrdsDownload] Downloading CRD tar file", "remoteURL", data.CrdsRemoteURL(), "tarPath", crdsTarPath)
+	if err := util.DownloadFile(data.CrdsRemoteURL(), crdsTarPath); err != nil {
+		return fmt.Errorf("failed to download CRD tar, err: %w", err)
 	}
 
 	klog.V(2).InfoS("[runCrdsDownload] Successfully downloaded CRD package from remote URL", "remoteURL", data.CrdsRemoteURL(), "folder", crdsDir)
@@ -168,7 +179,7 @@ func existCrdsTar(crdsDir string) bool {
 
 func getCrdsDir(data InitData) string {
 	url := strings.TrimSpace(data.CrdsRemoteURL())
-	hash := md5.Sum([]byte(url))
+	hash := sha256.Sum256([]byte(url))
 	hashStr := hex.EncodeToString(hash[:])
-	return path.Join(data.DataDir(), hashStr)
+	return path.Join(data.DataDir(), "cache", hashStr)
 }

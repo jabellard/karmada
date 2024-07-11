@@ -1,19 +1,8 @@
 apiVersion: operator.karmada.io/v1alpha1
 kind: Karmada
 metadata:
-  annotations:
-    kubectl.kubernetes.io/last-applied-configuration: |
-      {"apiVersion":"operator.karmada.io/v1alpha1","kind":"Karmada","metadata":{"annotations":{},"name":"t1","namespace":"t1"},"spec":{"components":{"karmadaAPIServer":{"certSANs":["192.168.1.241"],"serviceType":"NodePort"},"karmadaAggregatedAPIServer":{"imageRepository":"docker.io/karmada/karmada-aggregated-apiserver","imageTag":"v1.9.0"},"karmadaControllerManager":{"imageRepository":"docker.io/karmada/karmada-controller-manager","imageTag":"v1.9.0"},"karmadaMetricsAdapter":{"imageRepository":"docker.io/karmada/karmada-metrics-adapter","imageTag":"v1.9.0"},"karmadaScheduler":{"imageRepository":"docker.io/karmada/karmada-scheduler","imageTag":"v1.9.0"},"karmadaWebhook":{"imageRepository":"docker.io/karmada/karmada-webhook","imageTag":"v1.9.0"}}}}
-  creationTimestamp: "2024-07-11T23:26:59Z"
-  finalizers:
-  - operator.karmada.io/finalizer
-  generation: 2
-  labels:
-    operator.karmada.io/disable-cascading-deletion: "false"
-  name: t1
-  namespace: t1
-  resourceVersion: "1720"
-  uid: 86f13f26-d7c6-4e60-9015-e4c6f8caa1d7
+  name: t2
+  namespace: t2
 spec:
   components:
     etcd:
@@ -72,18 +61,7 @@ spec:
       replicas: 1
       resources: {}
   crdDownloadPolicy: IfNotPresent
+  crdRemoteURL: https://github.com/karmada-io/karmada/releases/download/v1.9.2/crds.tar.gz
   hostCluster:
     networking:
       dnsDomain: cluster.local
-status:
-  conditions:
-  - lastTransitionTime: "2024-07-11T23:30:50Z"
-    message: 'failed to apply component KubeControllerManager, err: error when parsing
-      karmada-scheduler deployment template: error when executing template, err: template:
-      template:58:27: executing "template" at <.KarmadaCertsSecret>: can''t evaluate
-      field KarmadaCertsSecret in type struct { Replicas *int32; DeploymentName string;
-      Namespace string; SystemNamespace string; Image string; ImagePullPolicy string;
-      KubeconfigSecret string }'
-    reason: Failed
-    status: "False"
-    type: Ready

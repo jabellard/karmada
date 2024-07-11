@@ -44,13 +44,14 @@ var (
 
 // InitOptions defines all the init workflow options.
 type InitOptions struct {
-	Name           string
-	Namespace      string
-	Kubeconfig     *rest.Config
-	KarmadaVersion string
-	CRDRemoteURL   string
-	KarmadaDataDir string
-	Karmada        *operatorv1alpha1.Karmada
+	Name              string
+	Namespace         string
+	Kubeconfig        *rest.Config
+	KarmadaVersion    string
+	CRDRemoteURL      string
+	CRDDownloadPolicy operatorv1alpha1.CRDDownloadPolicy
+	KarmadaDataDir    string
+	Karmada           *operatorv1alpha1.Karmada
 }
 
 // Validate is used to validate the initOptions before creating initJob.
@@ -103,6 +104,7 @@ type initData struct {
 	karmadaClient       clientset.Interface
 	dnsDomain           string
 	CRDRemoteURL        string
+	CRDDownloadPolicy   operatorv1alpha1.CRDDownloadPolicy
 	karmadaDataDir      string
 	privateRegistry     string
 	featureGates        map[string]bool
@@ -184,6 +186,7 @@ func newRunData(opt *InitOptions) (*initData, error) {
 		controlplaneAddress: address,
 		remoteClient:        remoteClient,
 		CRDRemoteURL:        opt.CRDRemoteURL,
+		CRDDownloadPolicy:   opt.CRDDownloadPolicy,
 		karmadaDataDir:      opt.KarmadaDataDir,
 		privateRegistry:     privateRegistry,
 		components:          opt.Karmada.Spec.Components,
@@ -239,6 +242,10 @@ func (data *initData) CrdsRemoteURL() string {
 	return data.CRDRemoteURL
 }
 
+func (data *initData) CrdDownloadPolicy() operatorv1alpha1.CRDDownloadPolicy {
+	return data.CRDDownloadPolicy
+}
+
 func (data *initData) KarmadaVersion() string {
 	return data.karmadaVersion.String()
 }
@@ -269,10 +276,11 @@ func defaultJobInitOptions() *InitOptions {
 	operatorscheme.Scheme.Default(karmada)
 
 	return &InitOptions{
-		CRDRemoteURL:   fmt.Sprintf(defaultCrdURL, operatorv1alpha1.DefaultKarmadaImageVersion),
-		KarmadaVersion: operatorv1alpha1.DefaultKarmadaImageVersion,
-		KarmadaDataDir: constants.KarmadaDataDir,
-		Karmada:        karmada,
+		CRDRemoteURL:      fmt.Sprintf(defaultCrdURL, operatorv1alpha1.DefaultKarmadaImageVersion),
+		CRDDownloadPolicy: operatorv1alpha1.DownloadIfNotPresent,
+		KarmadaVersion:    operatorv1alpha1.DefaultKarmadaImageVersion,
+		KarmadaDataDir:    constants.KarmadaDataDir,
+		Karmada:           karmada,
 	}
 }
 
@@ -282,6 +290,10 @@ func NewInitOptWithKarmada(karmada *operatorv1alpha1.Karmada) InitOpt {
 		o.Karmada = karmada
 		o.Name = karmada.GetName()
 		o.Namespace = karmada.GetNamespace()
+		if len(karmada.Spec.CRDRemoteURL) > 0 {
+			o.CRDRemoteURL = karmada.Spec.CRDRemoteURL
+		}
+		o.CRDDownloadPolicy = karmada.Spec.CRDDownloadPolicy
 	}
 }
 

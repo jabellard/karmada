@@ -18,7 +18,6 @@ package karmada
 
 import (
 	"context"
-	operator "github.com/karmada-io/karmada/operator/pkg"
 	"reflect"
 	"strconv"
 	"time"
@@ -100,12 +99,7 @@ func (ctrl *Controller) Reconcile(ctx context.Context, req controllerruntime.Req
 
 func (ctrl *Controller) syncKarmada(karmada *operatorv1alpha1.Karmada) error {
 	klog.V(2).InfoS("Reconciling karmada", "name", karmada.Name)
-	initOps := func(o *operator.InitOptions) {
-		if len(ctrl.CRDRemoteURL) > 0 {
-			o.CRDRemoteURL = ctrl.CRDRemoteURL
-		}
-	}
-	planner, err := NewPlannerFor(karmada, ctrl.Client, ctrl.Config, initOps)
+	planner, err := NewPlannerFor(karmada, ctrl.Client, ctrl.Config)
 	if err != nil {
 		return err
 	}
