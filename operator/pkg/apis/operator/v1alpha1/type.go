@@ -252,6 +252,14 @@ type ExternalEtcd struct {
 	// KeyData is an SSL key file used to secure etcd communication.
 	// Required if using a TLS connection.
 	KeyData []byte `json:"keyData"`
+
+	// SecretRef references a Kubernetes secret containing the etcd connection credentials.
+	// The secret must contain the following data keys:
+	// ca.crt: The Certificate Authority (CA) certificate data.
+	// tls.crt: The TLS certificate data.
+	// tls.key: The TLS private key data.
+	// +optional
+	SecretRef *LocalSecretReference `json:"secretRef,omitempty"`
 }
 
 // KarmadaAPIServer holds settings to kube-apiserver component of the kubernetes.
