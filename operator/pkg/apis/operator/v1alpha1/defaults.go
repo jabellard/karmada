@@ -108,6 +108,7 @@ func setDefaultsHostCluster(obj *Karmada) {
 }
 
 func setDefaultsEtcd(obj *KarmadaComponents) {
+	// This should only be set if external etcd is not configured
 	if obj.Etcd == nil {
 		obj.Etcd = &Etcd{}
 	}

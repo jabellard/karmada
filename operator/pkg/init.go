@@ -119,6 +119,16 @@ func NewInitJob(opt *InitOptions) *workflow.Job {
 	initJob.AppendTask(tasks.NewCertTask())
 	initJob.AppendTask(tasks.NewNamespaceTask())
 	initJob.AppendTask(tasks.NewUploadCertsTask())
+	// Here we have access to the Karmada CR. If external etcd was not set, given that defaults for an interanl etcd instance would have been set
+	// we should check if internal etcd is set. If it is not set, then we should not run this job.
+
+	// What if we're transitioning from internal etcd to external etcd?
+	// How do we know? Is this a create or delte?
+	// If it is a transition, then in that case, we should deinit the previously installed etcd isntance: deltes stateful set, service and headlioess service
+
+	// Behavior for transitions
+	// Internal to external: Should this even be allowed? If yes, we should get rid of stateful set and other resources, but then what should we do with the persistent data? It should not be deleted.
+	// External to internal: Should thisd even be allowed? If so, we should provision etcd instance. External credentials came from secret, so there's now ork to be done for init workflow.
 	initJob.AppendTask(tasks.NewEtcdTask())
 	initJob.AppendTask(tasks.NewKarmadaApiserverTask())
 	initJob.AppendTask(tasks.NewUploadKubeconfigTask())

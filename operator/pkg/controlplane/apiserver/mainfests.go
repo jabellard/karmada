@@ -146,6 +146,11 @@ spec:
   type: {{ .ServiceType }}
 `
 
+	// cert that contains etcd credentials has these data keys that we care about: etcd-ca.crt, tcd-client.crt, etcd-client.key
+	// Proposed secret structure has the following keys: ca.crt, tls.crt, and tls.key. There's a mismatch here. We have two options:
+	// 1. Change proposal to match expected data key layout
+	// 2. Keep proposal as is and just map new secret keys to expected key names. Requires that volume is not statically defined here and will have to be patched in
+
 	// KarmadaAggregatedAPIServerDeployment is karmada aggreagated apiserver deployment manifest
 	KarmadaAggregatedAPIServerDeployment = `
 apiVersion: apps/v1

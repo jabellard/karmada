@@ -17,6 +17,9 @@ limitations under the License.
 package search
 
 const (
+	// Here, secret that is used contains noat only etcd certs but also other karmada certs. We should do the following:
+	// Use two cert sources instad of one. 1 for karmada stuff and then the dedicated one for etdd
+	// Once that's done, welll use the same mounting strategy for the api servers
 	// KarmadaSearchDeployment is karmada search deployment manifest
 	KarmadaSearchDeployment = `
 apiVersion: apps/v1
