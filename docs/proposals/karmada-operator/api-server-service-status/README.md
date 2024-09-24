@@ -20,7 +20,7 @@ eliminating the need to infer the service name and exposed client port. This is 
 
 ## Motivation
 
-When managing a Karmada instance, referencing its API server service (e.g., for creating an ingress resource) currently requires inferring the service name and exposed port from conventions. While service names follow a pattern, relying on this method is brittle since it depends on internal implementation details that may change.
+When managing a Karmada instance, referencing its API server service (e.g., for creating an ingress resource) currently requires inferring the service name and exposed port from conventions. Relying on this method is brittle since it depends on internal implementation details that may change.
 
 By including the API server service information directly in the `KarmadaStatus` field, operators can directly reference the service name and exposed port, improving reliability and simplifying cluster management.
 
