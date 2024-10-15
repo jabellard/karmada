@@ -67,11 +67,24 @@ type KarmadaStatus struct {
 
 // APIServerServiceStatus contains the current status of the API server service.
 type APIServerServiceStatus struct {
-	// Name represents the name of the service.
-	Name string `json:"name"`
-
-	// Port represents the client port exposed by the service.
-	Port int32 `json:"port"`
+    // Name represents the name of the service.
+    Name string `json:"name"`
+    
+    // ServiceType represents the service type
+    ServiceType corev1.ServiceType `json:"serviceType"`
+    
+    // Port represents the port exposed by the service.
+    Port int32 `json:"port"`
+    
+    // NodePort represents the node port on which the service is exposed
+    // when service is of type NodePort or LoadBalancer
+    // +optional
+    NodePort int32 `json:"nodePort"`
+    
+    // LoadBalancerStatus represents the status of a load-balancer when
+    // the service is of type LoadBalancer
+    // +optional
+    LoadBalancerStatus corev1.LoadBalancerStatus `json:"loadBalancerStatus"`
 }
 ```
 The Karmada operator will need to be updated to populate the `APIServerServiceStatus` field during its reconciliation process.
