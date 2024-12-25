@@ -27,7 +27,6 @@ import (
 	"k8s.io/klog/v2"
 
 	operatorv1alpha1 "github.com/karmada-io/karmada/operator/pkg/apis/operator/v1alpha1"
-
 	"github.com/karmada-io/karmada/operator/pkg/certs"
 	"github.com/karmada-io/karmada/operator/pkg/constants"
 	"github.com/karmada-io/karmada/operator/pkg/util"
