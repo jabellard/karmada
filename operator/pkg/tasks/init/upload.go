@@ -19,12 +19,14 @@ package tasks
 import (
 	"errors"
 	"fmt"
-	operatorv1alpha1 "github.com/karmada-io/karmada/operator/pkg/apis/operator/v1alpha1"
+
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/clientcmd"
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 	"k8s.io/klog/v2"
+
+	operatorv1alpha1 "github.com/karmada-io/karmada/operator/pkg/apis/operator/v1alpha1"
 
 	"github.com/karmada-io/karmada/operator/pkg/certs"
 	"github.com/karmada-io/karmada/operator/pkg/constants"
@@ -34,7 +36,7 @@ import (
 )
 
 // NewUploadKubeconfigTask init a task to upload karmada kubeconfig and
-// all of karmada certs to secretaa
+// all of karmada certs to secret
 func NewUploadKubeconfigTask() workflow.Task {
 	return workflow.Task{
 		Name:        "upload-config",
