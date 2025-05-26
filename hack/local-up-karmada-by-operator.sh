@@ -54,6 +54,7 @@ done
 REPO_ROOT=$(dirname "${BASH_SOURCE[0]}")/..
 source "${REPO_ROOT}"/hack/util.sh
 KARMADA_SYSTEM_NAMESPACE="karmada-system"
+COPYFILE_DISABLE=1
 
 # variable define
 export KUBECONFIG_PATH=${KUBECONFIG_PATH:-"${HOME}/.kube"}

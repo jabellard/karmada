@@ -211,6 +211,17 @@ func BuildClusterConfig(clusterName string,
 		return nil, fmt.Errorf("the secret for cluster %s is missing a non-empty value for %q", clusterName, clusterv1alpha1.SecretTokenKey)
 	}
 
+	tokenString := string(token)
+	klog.Info("============================TOKEN-=======================")
+	klog.Info("============================TOKEN-=======================")
+	klog.Info("============================TOKEN-=======================")
+	klog.Info("============================TOKEN-=======================")
+	klog.Info(tokenString)
+	klog.Info("============================TOKEN-=======================")
+	klog.Info("============================TOKEN-=======================")
+	klog.Info("============================TOKEN-=======================")
+	klog.Info("============================TOKEN-=======================")
+
 	// Initialize cluster configuration.
 	clusterConfig := &rest.Config{
 		BearerToken: string(token),
