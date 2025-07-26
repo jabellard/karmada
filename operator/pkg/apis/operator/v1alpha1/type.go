@@ -19,6 +19,7 @@ package v1alpha1
 import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/intstr"
 )
 
 // +genclient
@@ -683,6 +684,27 @@ type CommonSettings struct {
 	// +kubebuilder:default="system-node-critical"
 	// +optional
 	PriorityClassName string `json:"priorityClassName,omitempty"`
+
+	// PodDisruptionBudgetConfig specifies the PodDisruptionBudget configuration
+	// for this component’s pods. If not set, no PDB will be created.
+	// +optional
+	PodDisruptionBudgetConfig *PodDisruptionBudgetConfig `json:"podDisruptionBudgetConfig,omitempty"`
+}
+
+// PodDisruptionBudgetConfig defines a subset of PodDisruptionBudgetSpec fields
+// that users can configure for their control plane components.
+type PodDisruptionBudgetConfig struct {
+	// minAvailable specifies the minimum number or percentage of pods
+	// that must remain available after evictions.
+	// Mutually exclusive with maxUnavailable.
+	// +optional
+	MinAvailable *intstr.IntOrString `json:"minAvailable,omitempty"`
+
+	// maxUnavailable specifies the maximum number or percentage of pods
+	// that can be unavailable after evictions.
+	// Mutually exclusive with minAvailable.
+	// +optional
+	MaxUnavailable *intstr.IntOrString `json:"maxUnavailable,omitempty"`
 }
 
 // Image allows to customize the image used for components.
