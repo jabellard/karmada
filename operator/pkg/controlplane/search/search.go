@@ -77,6 +77,14 @@ func installKarmadaSearch(client clientset.Interface, cfg *operatorv1alpha1.Karm
 	if err := apiclient.CreateOrUpdateDeployment(client, searchDeployment); err != nil {
 		return fmt.Errorf("error when creating deployment for %s, err: %w", searchDeployment.Name, err)
 	}
+
+	if err := apiclient.CreateOrUpdatePodDisruptionBudgetForDeployment(
+		client,
+		searchDeployment,
+		cfg.CommonSettings.PodDisruptionBudgetConfig,
+	); err != nil {
+		return fmt.Errorf("failed to reconcile PDB for deployment %s: %w", searchDeployment.Name, err)
+	}
 	return nil
 }
 

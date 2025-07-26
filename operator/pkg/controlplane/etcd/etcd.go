@@ -98,6 +98,14 @@ func installKarmadaEtcd(client clientset.Interface, name, namespace string, cfg 
 		return fmt.Errorf("error when creating Etcd statefulset, err: %w", err)
 	}
 
+	if err := apiclient.CreateOrUpdatePodDisruptionBudgetForStatefulSet(
+		client,
+		etcdStatefulSet,
+		cfg.CommonSettings.PodDisruptionBudgetConfig,
+	); err != nil {
+		return fmt.Errorf("failed to reconcile PDB for deployment %s: %w", etcdStatefulSet.Name, err)
+	}
+
 	return nil
 }
 

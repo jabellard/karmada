@@ -159,7 +159,9 @@ func CreateOrUpdatePodDisruptionBudgetForDeployment(
 			}},
 		},
 		Spec: policyv1.PodDisruptionBudgetSpec{
-			Selector:       &metav1.LabelSelector{MatchLabels: dep.Spec.Template.Labels},
+			Selector: &metav1.LabelSelector{
+				MatchLabels: dep.Spec.Template.Labels,
+			},
 			MinAvailable:   cfg.MinAvailable,
 			MaxUnavailable: cfg.MaxUnavailable,
 		},
@@ -176,6 +178,67 @@ func CreateOrUpdatePodDisruptionBudgetForDeployment(
 		}
 	}
 	klog.V(5).InfoS("Successfully created or updated PBD for deployment", "namespace", dep.Namespace, "name", dep.Name)
+	return nil
+}
+
+// CreateOrUpdatePodDisruptionBudgetForStatefulSet will build a PDB
+// owned by the given StatefulSet, then Create it if missing or
+// Update it in‑place if it already exists. If cfg is nil, it
+// will delete any existing PDB with the same name.
+func CreateOrUpdatePodDisruptionBudgetForStatefulSet(
+	client clientset.Interface,
+	sts *appsv1.StatefulSet,
+	cfg *operatorv1alpha1.PodDisruptionBudgetConfig,
+) error {
+	pdbClient := client.PolicyV1().PodDisruptionBudgets(sts.Namespace)
+	name := sts.Name
+
+	// If the user disabled PDBs, delete any stray one and return
+	if cfg == nil {
+		if err := pdbClient.Delete(context.TODO(), name, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
+			return fmt.Errorf("failed to delete PDB %s/%s: %w", sts.Namespace, name, err)
+		}
+		return nil
+	}
+
+	desired := &policyv1.PodDisruptionBudget{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: "policy/v1",
+			Kind:       "PodDisruptionBudget",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: sts.Namespace,
+			Labels:    sts.Spec.Template.Labels,
+			OwnerReferences: []metav1.OwnerReference{{
+				APIVersion: "apps/v1",
+				Kind:       "StatefulSet",
+				Name:       sts.Name,
+				UID:        sts.UID,
+				Controller: ptr.To(true),
+			}},
+		},
+		Spec: policyv1.PodDisruptionBudgetSpec{
+			Selector: &metav1.LabelSelector{
+				MatchLabels: sts.Spec.Template.Labels,
+			},
+			MinAvailable:   cfg.MinAvailable,
+			MaxUnavailable: cfg.MaxUnavailable,
+		},
+	}
+
+	// Try to create
+	if _, err := pdbClient.Create(context.TODO(), desired, metav1.CreateOptions{}); err != nil {
+		if !apierrors.IsAlreadyExists(err) {
+			return fmt.Errorf("failed to create PDB %s/%s: %w", sts.Namespace, name, err)
+		}
+		// Already exists, so update
+		if _, err := pdbClient.Update(context.TODO(), desired, metav1.UpdateOptions{}); err != nil {
+			return fmt.Errorf("failed to update PDB %s/%s: %w", sts.Namespace, name, err)
+		}
+	}
+
+	klog.V(5).InfoS("Successfully created or updated PDB for statefulset", "namespace", sts.Namespace, "name", sts.Name)
 	return nil
 }
 

@@ -70,6 +70,14 @@ func installKarmadaMetricAdapter(client clientset.Interface, cfg *operatorv1alph
 	if err := apiclient.CreateOrUpdateDeployment(client, metricAdapter); err != nil {
 		return fmt.Errorf("error when creating deployment for %s, err: %w", metricAdapter.Name, err)
 	}
+
+	if err := apiclient.CreateOrUpdatePodDisruptionBudgetForDeployment(
+		client,
+		metricAdapter,
+		cfg.CommonSettings.PodDisruptionBudgetConfig,
+	); err != nil {
+		return fmt.Errorf("failed to reconcile PDB for deployment %s: %w", metricAdapter.Name, err)
+	}
 	return nil
 }
 

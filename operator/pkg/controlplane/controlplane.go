@@ -48,6 +48,28 @@ func EnsureControlPlaneComponent(component, name, namespace string, featureGates
 	if err := apiclient.CreateOrUpdateDeployment(client, deployment); err != nil {
 		return fmt.Errorf("failed to create deployment resource for component %s, err: %w", component, err)
 	}
+
+	var pdbConfig *operatorv1alpha1.PodDisruptionBudgetConfig
+	switch component {
+	case constants.KarmadaControllerManagerComponent:
+		pdbConfig = cfg.KarmadaControllerManager.PodDisruptionBudgetConfig
+	case constants.KubeControllerManagerComponent:
+		pdbConfig = cfg.KubeControllerManager.PodDisruptionBudgetConfig
+	case constants.KarmadaSchedulerComponent:
+		pdbConfig = cfg.KarmadaScheduler.PodDisruptionBudgetConfig
+	case constants.KarmadaDeschedulerComponent:
+		pdbConfig = cfg.KarmadaDescheduler.PodDisruptionBudgetConfig
+	default:
+		pdbConfig = nil
+	}
+
+	if err := apiclient.CreateOrUpdatePodDisruptionBudgetForDeployment(
+		client,
+		deployment,
+		pdbConfig,
+	); err != nil {
+		return fmt.Errorf("failed to reconcile PodDisruptionBudget for component %s: %w", component, err)
+	}
 	return nil
 }
 

@@ -71,6 +71,14 @@ func installKarmadaWebhook(client clientset.Interface, cfg *operatorv1alpha1.Kar
 	if err := apiclient.CreateOrUpdateDeployment(client, webhookDeployment); err != nil {
 		return fmt.Errorf("error when creating deployment for %s, err: %w", webhookDeployment.Name, err)
 	}
+
+	if err := apiclient.CreateOrUpdatePodDisruptionBudgetForDeployment(
+		client,
+		webhookDeployment,
+		cfg.CommonSettings.PodDisruptionBudgetConfig,
+	); err != nil {
+		return fmt.Errorf("failed to reconcile PDB for deployment %s: %w", webhookDeployment.Name, err)
+	}
 	return nil
 }
 
