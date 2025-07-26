@@ -20,6 +20,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	operatorv1alpha1 "github.com/karmada-io/karmada/operator/pkg/apis/operator/v1alpha1"
+	policyv1 "k8s.io/api/policy/v1"
+	"k8s.io/utils/ptr"
 	"strings"
 
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
@@ -115,6 +118,64 @@ func CreateOrUpdateService(client clientset.Interface, service *corev1.Service) 
 	}
 
 	klog.V(5).InfoS("Successfully created or updated service", "service", service.GetName())
+	return nil
+}
+
+// CreateOrUpdatePodDisruptionBudgetForDeployment will build a PDB
+// owned by the given Deployment, then Create it if missing or
+// Update it in‑place if it already exists. If cfg is nil, it
+// will delete any existing PDB with the same name.
+func CreateOrUpdatePodDisruptionBudgetForDeployment(
+	client clientset.Interface,
+	dep *appsv1.Deployment,
+	cfg *operatorv1alpha1.PodDisruptionBudgetConfig,
+) error {
+	pdbClient := client.PolicyV1().PodDisruptionBudgets(dep.Namespace)
+	name := dep.Name
+
+	// If the user disabled PDBs, make sure we remove any existing one.
+	if cfg == nil {
+		if err := pdbClient.Delete(context.TODO(), dep.Name, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
+			return fmt.Errorf("failed to delete PDB %s/%s: %w", dep.Namespace, name, err)
+		}
+		return nil
+	}
+
+	desired := &policyv1.PodDisruptionBudget{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: "policy/v1",
+			Kind:       "PodDisruptionBudget",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: dep.Namespace,
+			Labels:    dep.Spec.Template.Labels,
+			OwnerReferences: []metav1.OwnerReference{{
+				APIVersion: "apps/v1",
+				Kind:       "Deployment",
+				Name:       dep.Name,
+				UID:        dep.UID,
+				Controller: ptr.To(true),
+			}},
+		},
+		Spec: policyv1.PodDisruptionBudgetSpec{
+			Selector:       &metav1.LabelSelector{MatchLabels: dep.Spec.Template.Labels},
+			MinAvailable:   cfg.MinAvailable,
+			MaxUnavailable: cfg.MaxUnavailable,
+		},
+	}
+
+	// Try to create
+	if _, err := pdbClient.Create(context.TODO(), desired, metav1.CreateOptions{}); err != nil {
+		if !apierrors.IsAlreadyExists(err) {
+			return fmt.Errorf("failed to create PDB %s/%s: %w", dep.Namespace, name, err)
+		}
+		// Already exists, so update
+		if _, err := pdbClient.Update(context.TODO(), desired, metav1.UpdateOptions{}); err != nil {
+			return fmt.Errorf("failed to update PDB %s/%s: %w", dep.Namespace, name, err)
+		}
+	}
+	klog.V(5).InfoS("Successfully created or updated PBD for deployment", "namespace", dep.Namespace, "name", dep.Name)
 	return nil
 }
 

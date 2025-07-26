@@ -18,19 +18,17 @@ package apiserver
 
 import (
 	"fmt"
-
+	operatorv1alpha1 "github.com/karmada-io/karmada/operator/pkg/apis/operator/v1alpha1"
+	"github.com/karmada-io/karmada/operator/pkg/controlplane/etcd"
+	"github.com/karmada-io/karmada/operator/pkg/util"
+	"github.com/karmada-io/karmada/operator/pkg/util/apiclient"
+	"github.com/karmada-io/karmada/operator/pkg/util/patcher"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	kuberuntime "k8s.io/apimachinery/pkg/runtime"
 	clientset "k8s.io/client-go/kubernetes"
 	clientsetscheme "k8s.io/client-go/kubernetes/scheme"
-
-	operatorv1alpha1 "github.com/karmada-io/karmada/operator/pkg/apis/operator/v1alpha1"
-	"github.com/karmada-io/karmada/operator/pkg/controlplane/etcd"
-	"github.com/karmada-io/karmada/operator/pkg/util"
-	"github.com/karmada-io/karmada/operator/pkg/util/apiclient"
-	"github.com/karmada-io/karmada/operator/pkg/util/patcher"
 )
 
 // EnsureKarmadaAPIServer creates karmada apiserver deployment and service resource
@@ -87,6 +85,15 @@ func installKarmadaAPIServer(client clientset.Interface, cfg *operatorv1alpha1.K
 	if err := apiclient.CreateOrUpdateDeployment(client, apiserverDeployment); err != nil {
 		return fmt.Errorf("error when creating deployment for %s, err: %w", apiserverDeployment.Name, err)
 	}
+
+	if err := apiclient.CreateOrUpdatePodDisruptionBudgetForDeployment(
+		client,
+		apiserverDeployment,
+		cfg.CommonSettings.PodDisruptionBudgetConfig,
+	); err != nil {
+		return fmt.Errorf("failed to reconcile PDB for deployment %s: %w", apiserverDeployment.Name, err)
+	}
+
 	return nil
 }
 
@@ -157,6 +164,14 @@ func installKarmadaAggregatedAPIServer(client clientset.Interface, cfg *operator
 
 	if err := apiclient.CreateOrUpdateDeployment(client, aggregatedAPIServerDeployment); err != nil {
 		return fmt.Errorf("error when creating deployment for %s, err: %w", aggregatedAPIServerDeployment.Name, err)
+	}
+
+	if err := apiclient.CreateOrUpdatePodDisruptionBudgetForDeployment(
+		client,
+		aggregatedAPIServerDeployment,
+		cfg.CommonSettings.PodDisruptionBudgetConfig,
+	); err != nil {
+		return fmt.Errorf("failed to reconcile PDB for deployment %s: %w", aggregatedAPIServerDeployment.Name, err)
 	}
 	return nil
 }
