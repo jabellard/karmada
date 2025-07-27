@@ -19,6 +19,7 @@ package karmada
 import (
 	"context"
 	"fmt"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"net/url"
 
 	corev1 "k8s.io/api/core/v1"
@@ -31,6 +32,123 @@ import (
 	"github.com/karmada-io/karmada/operator/pkg/util"
 	"github.com/karmada-io/karmada/pkg/util/lifted"
 )
+
+// validatePDBConfigs ensures each component's PodDisruptionBudgetConfig is well-formed
+// and consistent with the configured replica count.
+func validatePDBConfigs(components *operatorv1alpha1.KarmadaComponents, fldPath *field.Path) (errs field.ErrorList) {
+	if components == nil {
+		return nil
+	}
+
+	check := func(path *field.Path, cfg *operatorv1alpha1.PodDisruptionBudgetConfig, replicas *int32) {
+		if cfg == nil {
+			return
+		}
+		// must set either minAvailable or maxUnavailable
+		if cfg.MinAvailable == nil && cfg.MaxUnavailable == nil {
+			errs = append(errs, field.Invalid(path, cfg, "either minAvailable or maxUnavailable must be set"))
+			return
+		}
+		// cannot set both
+		if cfg.MinAvailable != nil && cfg.MaxUnavailable != nil {
+			errs = append(errs, field.Invalid(path, cfg, "minAvailable and maxUnavailable are mutually exclusive"))
+		}
+
+		// default replicas=1 if unset
+		replicaCount := int32(1)
+		if replicas != nil {
+			replicaCount = *replicas
+		}
+
+		// validate minAvailable
+		if cfg.MinAvailable != nil {
+			val, err := intstr.GetScaledValueFromIntOrPercent(cfg.MinAvailable, int(replicaCount), false)
+			if err != nil {
+				errs = append(errs, field.Invalid(path.Child("minAvailable"), cfg.MinAvailable, "invalid percentage or integer"))
+			} else if val > int(replicaCount) {
+				errs = append(errs, field.Invalid(
+					path.Child("minAvailable"), cfg.MinAvailable,
+					fmt.Sprintf("minAvailable %d cannot be greater than replicas %d", val, replicaCount),
+				))
+			}
+		}
+
+		// validate maxUnavailable
+		if cfg.MaxUnavailable != nil {
+			val, err := intstr.GetScaledValueFromIntOrPercent(cfg.MaxUnavailable, int(replicaCount), true)
+			if err != nil {
+				errs = append(errs, field.Invalid(path.Child("maxUnavailable"), cfg.MaxUnavailable, "invalid percentage or integer"))
+			} else if val > int(replicaCount) {
+				errs = append(errs, field.Invalid(
+					path.Child("maxUnavailable"), cfg.MaxUnavailable,
+					fmt.Sprintf("maxUnavailable %d cannot be greater than replicas %d", val, replicaCount),
+				))
+			}
+		}
+	}
+
+	if components.Etcd != nil && components.Etcd.Local != nil {
+		check(fldPath.Child("etcd").Child("podDisruptionBudgetConfig"),
+			components.Etcd.Local.PodDisruptionBudgetConfig,
+			components.Etcd.Local.Replicas,
+		)
+	}
+	if components.KarmadaAPIServer != nil {
+		check(fldPath.Child("karmadaAPIServer").Child("podDisruptionBudgetConfig"),
+			components.KarmadaAPIServer.PodDisruptionBudgetConfig,
+			components.KarmadaAPIServer.Replicas,
+		)
+	}
+	if components.KarmadaAggregatedAPIServer != nil {
+		check(fldPath.Child("karmadaAggregatedAPIServer").Child("podDisruptionBudgetConfig"),
+			components.KarmadaAggregatedAPIServer.PodDisruptionBudgetConfig,
+			components.KarmadaAggregatedAPIServer.Replicas,
+		)
+	}
+	if components.KubeControllerManager != nil {
+		check(fldPath.Child("kubeControllerManager").Child("podDisruptionBudgetConfig"),
+			components.KubeControllerManager.PodDisruptionBudgetConfig,
+			components.KubeControllerManager.Replicas,
+		)
+	}
+	if components.KarmadaControllerManager != nil {
+		check(fldPath.Child("karmadaControllerManager").Child("podDisruptionBudgetConfig"),
+			components.KarmadaControllerManager.PodDisruptionBudgetConfig,
+			components.KarmadaControllerManager.Replicas,
+		)
+	}
+	if components.KarmadaScheduler != nil {
+		check(fldPath.Child("karmadaScheduler").Child("podDisruptionBudgetConfig"),
+			components.KarmadaScheduler.PodDisruptionBudgetConfig,
+			components.KarmadaScheduler.Replicas,
+		)
+	}
+	if components.KarmadaDescheduler != nil {
+		check(fldPath.Child("karmadaDescheduler").Child("podDisruptionBudgetConfig"),
+			components.KarmadaDescheduler.PodDisruptionBudgetConfig,
+			components.KarmadaDescheduler.Replicas,
+		)
+	}
+	if components.KarmadaSearch != nil {
+		check(fldPath.Child("karmadaSearch").Child("podDisruptionBudgetConfig"),
+			components.KarmadaSearch.PodDisruptionBudgetConfig,
+			components.KarmadaSearch.Replicas,
+		)
+	}
+	if components.KarmadaMetricsAdapter != nil {
+		check(fldPath.Child("karmadaMetricsAdapter").Child("podDisruptionBudgetConfig"),
+			components.KarmadaMetricsAdapter.PodDisruptionBudgetConfig,
+			components.KarmadaMetricsAdapter.Replicas,
+		)
+	}
+	if components.KarmadaWebhook != nil {
+		check(fldPath.Child("karmadaWebhook").Child("podDisruptionBudgetConfig"),
+			components.KarmadaWebhook.PodDisruptionBudgetConfig,
+			components.KarmadaWebhook.Replicas,
+		)
+	}
+	return errs
+}
 
 func validateCRDTarball(crdTarball *operatorv1alpha1.CRDTarball, fldPath *field.Path) (errs field.ErrorList) {
 	if crdTarball == nil || crdTarball.HTTPSource == nil {
@@ -95,6 +213,7 @@ func validate(karmada *operatorv1alpha1.Karmada) error {
 	if karmada.Spec.Components != nil {
 		components, fldPath := karmada.Spec.Components, field.NewPath("spec").Child("components")
 
+		errs = append(errs, validatePDBConfigs(components, fldPath)...)
 		errs = append(errs, validateKarmadaAPIServer(components.KarmadaAPIServer, karmada.Spec.HostCluster, fldPath.Child("karmadaAPIServer"))...)
 		errs = append(errs, validateETCD(components.Etcd, karmada.Name, fldPath.Child("etcd"))...)
 	}
