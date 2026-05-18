@@ -32,13 +32,16 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	dynamicfake "k8s.io/client-go/dynamic/fake"
 	kubernetesfake "k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/tools/cache"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	clusterv1alpha1 "github.com/karmada-io/karmada/pkg/apis/cluster/v1alpha1"
 	"github.com/karmada-io/karmada/pkg/sharedcli/ratelimiterflag"
@@ -1242,4 +1245,348 @@ func TestGetClusterHealthStatus(t *testing.T) {
 		assert.Equal(t, true, online)
 		assert.Equal(t, false, healthy)
 	})
+}
+
+// newTestInformerManagers creates fresh informer manager instances instead of using the
+// global singletons (GetInstance), so tests don't leak state to each other.
+func newTestInformerManagers(t *testing.T) (genericmanager.MultiClusterInformerManager, typedmanager.MultiClusterInformerManager) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	return genericmanager.NewMultiClusterInformerManager(ctx), typedmanager.NewMultiClusterInformerManager(ctx, nil)
+}
+
+func TestClusterSecretMapFunc(t *testing.T) {
+	tests := []struct {
+		name     string
+		secret   client.Object
+		expected []reconcile.Request
+	}{
+		{
+			name: "secret with cluster owner ref returns request",
+			secret: &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "cluster-1-token",
+					Namespace: "karmada-cluster",
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion: clusterv1alpha1.GroupVersion.String(),
+							Kind:       "Cluster",
+							Name:       "cluster-1",
+						},
+					},
+				},
+			},
+			expected: []reconcile.Request{
+				{NamespacedName: types.NamespacedName{Name: "cluster-1"}},
+			},
+		},
+		{
+			name: "secret with no owner refs returns empty",
+			secret: &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "unrelated-secret",
+					Namespace: "karmada-cluster",
+				},
+			},
+			expected: nil,
+		},
+		{
+			name: "secret with non-cluster owner ref returns empty",
+			secret: &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "some-secret",
+					Namespace: "default",
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion: "apps/v1",
+							Kind:       "Deployment",
+							Name:       "my-app",
+						},
+					},
+				},
+			},
+			expected: nil,
+		},
+		{
+			name: "secret with wrong API version returns empty",
+			secret: &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "cluster-2-token",
+					Namespace: "karmada-cluster",
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion: "wrong.io/v1",
+							Kind:       "Cluster",
+							Name:       "cluster-2",
+						},
+					},
+				},
+			},
+			expected: nil,
+		},
+		{
+			name: "secret with multiple owner refs only matches cluster",
+			secret: &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "cluster-3-token",
+					Namespace: "karmada-cluster",
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion: "apps/v1",
+							Kind:       "Deployment",
+							Name:       "my-app",
+						},
+						{
+							APIVersion: clusterv1alpha1.GroupVersion.String(),
+							Kind:       "Cluster",
+							Name:       "cluster-3",
+						},
+					},
+				},
+			},
+			expected: []reconcile.Request{
+				{NamespacedName: types.NamespacedName{Name: "cluster-3"}},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			genericMgr, typedMgr := newTestInformerManagers(t)
+			c := &ClusterStatusController{
+				GenericInformerManager: genericMgr,
+				TypedInformerManager:   typedMgr,
+			}
+			result := c.clusterSecretMapFunc(context.Background(), tt.secret)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestClusterSecretMapFunc_StopsInformerManagers(t *testing.T) {
+	clusterName := "cluster-1"
+	genericMgr, typedMgr := newTestInformerManagers(t)
+
+	genericMgr.ForCluster(clusterName, dynamicfake.NewSimpleDynamicClient(runtime.NewScheme()), 0)
+	typedMgr.ForCluster(clusterName, kubernetesfake.NewSimpleClientset(), 0)
+
+	assert.True(t, genericMgr.IsManagerExist(clusterName))
+	assert.NotNil(t, typedMgr.GetSingleClusterManager(clusterName))
+
+	c := &ClusterStatusController{
+		GenericInformerManager: genericMgr,
+		TypedInformerManager:   typedMgr,
+	}
+
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "cluster-1-token",
+			Namespace: "karmada-cluster",
+			OwnerReferences: []metav1.OwnerReference{
+				{
+					APIVersion: clusterv1alpha1.GroupVersion.String(),
+					Kind:       "Cluster",
+					Name:       clusterName,
+				},
+			},
+		},
+	}
+
+	requests := c.clusterSecretMapFunc(context.Background(), secret)
+	assert.Len(t, requests, 1)
+	assert.Equal(t, clusterName, requests[0].Name)
+
+	assert.False(t, genericMgr.IsManagerExist(clusterName), "GenericInformerManager should be stopped")
+	assert.Nil(t, typedMgr.GetSingleClusterManager(clusterName), "TypedInformerManager should be stopped")
+}
+
+func TestClusterSecretMapFunc_OnlyStopsAffectedCluster(t *testing.T) {
+	genericMgr, typedMgr := newTestInformerManagers(t)
+
+	genericMgr.ForCluster("cluster-1", dynamicfake.NewSimpleDynamicClient(runtime.NewScheme()), 0)
+	genericMgr.ForCluster("cluster-2", dynamicfake.NewSimpleDynamicClient(runtime.NewScheme()), 0)
+	typedMgr.ForCluster("cluster-1", kubernetesfake.NewSimpleClientset(), 0)
+	typedMgr.ForCluster("cluster-2", kubernetesfake.NewSimpleClientset(), 0)
+
+	c := &ClusterStatusController{
+		GenericInformerManager: genericMgr,
+		TypedInformerManager:   typedMgr,
+	}
+
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "cluster-1-token",
+			Namespace: "karmada-cluster",
+			OwnerReferences: []metav1.OwnerReference{
+				{
+					APIVersion: clusterv1alpha1.GroupVersion.String(),
+					Kind:       "Cluster",
+					Name:       "cluster-1",
+				},
+			},
+		},
+	}
+
+	c.clusterSecretMapFunc(context.Background(), secret)
+
+	assert.False(t, genericMgr.IsManagerExist("cluster-1"), "cluster-1 generic manager should be stopped")
+	assert.Nil(t, typedMgr.GetSingleClusterManager("cluster-1"), "cluster-1 typed manager should be stopped")
+	assert.True(t, genericMgr.IsManagerExist("cluster-2"), "cluster-2 generic manager should NOT be stopped")
+	assert.NotNil(t, typedMgr.GetSingleClusterManager("cluster-2"), "cluster-2 typed manager should NOT be stopped")
+}
+
+func TestStopInformerManagerForCluster(t *testing.T) {
+	t.Run("stops both managers for existing cluster", func(t *testing.T) {
+		clusterName := "test-cluster"
+		genericMgr, typedMgr := newTestInformerManagers(t)
+
+		genericMgr.ForCluster(clusterName, dynamicfake.NewSimpleDynamicClient(runtime.NewScheme()), 0)
+		typedMgr.ForCluster(clusterName, kubernetesfake.NewSimpleClientset(), 0)
+
+		assert.True(t, genericMgr.IsManagerExist(clusterName))
+		assert.NotNil(t, typedMgr.GetSingleClusterManager(clusterName))
+
+		c := &ClusterStatusController{
+			GenericInformerManager: genericMgr,
+			TypedInformerManager:   typedMgr,
+		}
+		c.stopInformerManagerForCluster(clusterName)
+
+		assert.False(t, genericMgr.IsManagerExist(clusterName))
+		assert.Nil(t, typedMgr.GetSingleClusterManager(clusterName))
+	})
+
+	t.Run("no-op for non-existent cluster", func(t *testing.T) {
+		genericMgr, typedMgr := newTestInformerManagers(t)
+		c := &ClusterStatusController{
+			GenericInformerManager: genericMgr,
+			TypedInformerManager:   typedMgr,
+		}
+		// Should not panic
+		c.stopInformerManagerForCluster("non-existent-cluster")
+	})
+
+	t.Run("idempotent - double stop does not panic", func(t *testing.T) {
+		clusterName := "test-cluster"
+		genericMgr, typedMgr := newTestInformerManagers(t)
+
+		genericMgr.ForCluster(clusterName, dynamicfake.NewSimpleDynamicClient(runtime.NewScheme()), 0)
+		typedMgr.ForCluster(clusterName, kubernetesfake.NewSimpleClientset(), 0)
+
+		c := &ClusterStatusController{
+			GenericInformerManager: genericMgr,
+			TypedInformerManager:   typedMgr,
+		}
+		c.stopInformerManagerForCluster(clusterName)
+		c.stopInformerManagerForCluster(clusterName)
+
+		assert.False(t, genericMgr.IsManagerExist(clusterName))
+		assert.Nil(t, typedMgr.GetSingleClusterManager(clusterName))
+	})
+}
+
+func TestReconcile_RebuildsInformersAfterStop(t *testing.T) {
+	server := mockServer(http.StatusOK, false)
+	defer server.Close()
+
+	clusterName := "test-cluster"
+	genericMgr, typedMgr := newTestInformerManagers(t)
+
+	cluster := &clusterv1alpha1.Cluster{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: clusterName,
+			Finalizers: []string{
+				util.ClusterControllerFinalizer,
+			},
+		},
+		Spec: clusterv1alpha1.ClusterSpec{
+			APIEndpoint: server.URL,
+			SecretRef:   &clusterv1alpha1.LocalSecretReference{Namespace: "karmada-cluster", Name: "cluster-token"},
+		},
+	}
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: "karmada-cluster",
+			Name:      "cluster-token",
+		},
+		Data: map[string][]byte{
+			clusterv1alpha1.SecretTokenKey: []byte("token-a"),
+			clusterv1alpha1.SecretCADataKey: testCA,
+		},
+	}
+
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(gclient.NewSchema()).
+		WithObjects(cluster, secret).
+		WithStatusSubresource(cluster).
+		Build()
+
+	c := &ClusterStatusController{
+		Client:                       fakeClient,
+		GenericInformerManager:       genericMgr,
+		TypedInformerManager:         typedMgr,
+		ClusterClientOption:          &util.ClientOption{},
+		ClusterClientSetFunc:         util.NewClusterClientSet,
+		ClusterDynamicClientSetFunc:  util.NewClusterDynamicClientSet,
+		ClusterStatusUpdateFrequency: metav1.Duration{Duration: 10 * time.Second},
+		ClusterLeaseDuration:         metav1.Duration{Duration: 40 * time.Second},
+		ClusterLeaseRenewIntervalFraction: 0.25,
+		ClusterSuccessThreshold:      metav1.Duration{Duration: 30 * time.Second},
+		ClusterFailureThreshold:      metav1.Duration{Duration: 30 * time.Second},
+		ClusterCacheSyncTimeout:      metav1.Duration{Duration: 5 * time.Second},
+		EnableClusterResourceModeling: false,
+		RateLimiterOptions:           ratelimiterflag.Options{},
+		clusterConditionCache: clusterConditionStore{
+			successThreshold: 30 * time.Second,
+			failureThreshold: 30 * time.Second,
+		},
+	}
+
+	req := controllerruntime.Request{
+		NamespacedName: types.NamespacedName{Name: clusterName},
+	}
+
+	// First reconcile — should create the generic informer manager (typed only if resource modeling is enabled)
+	_, err := c.Reconcile(context.Background(), req)
+	assert.NoError(t, err)
+	assert.True(t, genericMgr.IsManagerExist(clusterName), "GenericInformerManager should exist after first reconcile")
+
+	// Simulate secret rotation by stopping informer managers (what clusterSecretMapFunc does)
+	c.stopInformerManagerForCluster(clusterName)
+	assert.False(t, genericMgr.IsManagerExist(clusterName), "GenericInformerManager should not exist after stop")
+
+	// Next reconcile — should recreate the generic informer manager
+	_, err = c.Reconcile(context.Background(), req)
+	assert.NoError(t, err)
+	assert.True(t, genericMgr.IsManagerExist(clusterName), "GenericInformerManager should be recreated after reconcile")
+}
+
+func TestReconcile_ClusterDeletion_StopsInformers(t *testing.T) {
+	clusterName := "deleted-cluster"
+	genericMgr, typedMgr := newTestInformerManagers(t)
+
+	genericMgr.ForCluster(clusterName, dynamicfake.NewSimpleDynamicClient(runtime.NewScheme()), 0)
+	typedMgr.ForCluster(clusterName, kubernetesfake.NewSimpleClientset(), 0)
+
+	c := &ClusterStatusController{
+		Client:                 fake.NewClientBuilder().WithScheme(gclient.NewSchema()).Build(),
+		GenericInformerManager: genericMgr,
+		TypedInformerManager:   typedMgr,
+		ClusterClientOption:    &util.ClientOption{},
+		ClusterClientSetFunc:   util.NewClusterClientSet,
+		clusterConditionCache: clusterConditionStore{
+			successThreshold: 30 * time.Second,
+			failureThreshold: 30 * time.Second,
+		},
+	}
+
+	req := controllerruntime.Request{
+		NamespacedName: types.NamespacedName{Name: clusterName},
+	}
+
+	_, err := c.Reconcile(context.Background(), req)
+	assert.NoError(t, err)
+	assert.False(t, genericMgr.IsManagerExist(clusterName), "GenericInformerManager should be stopped after cluster deletion")
+	assert.Nil(t, typedMgr.GetSingleClusterManager(clusterName), "TypedInformerManager should be stopped after cluster deletion")
 }

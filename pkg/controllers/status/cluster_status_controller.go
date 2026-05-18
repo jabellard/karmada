@@ -32,6 +32,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	clientset "k8s.io/client-go/kubernetes"
 	v1 "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/record"
@@ -44,7 +45,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/event"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	clusterv1alpha1 "github.com/karmada-io/karmada/pkg/apis/cluster/v1alpha1"
 	"github.com/karmada-io/karmada/pkg/features"
@@ -170,12 +174,53 @@ func (c *ClusterStatusController) SetupWithManager(mgr controllerruntime.Manager
 		successThreshold: c.ClusterSuccessThreshold.Duration,
 		failureThreshold: c.ClusterFailureThreshold.Duration,
 	}
+	// Only react to Secret updates (token rotation). Creates are irrelevant because informers
+	// don't exist yet for a new cluster, and deletes are handled by the BuildClusterConfig failure path.
+	secretPredicates := predicate.Funcs{
+		CreateFunc:  func(event.CreateEvent) bool { return false },
+		UpdateFunc:  func(event.UpdateEvent) bool { return true },
+		DeleteFunc:  func(event.DeleteEvent) bool { return false },
+		GenericFunc: func(event.GenericEvent) bool { return false },
+	}
+
 	return controllerruntime.NewControllerManagedBy(mgr).
 		Named(ControllerName).
 		For(&clusterv1alpha1.Cluster{}, builder.WithPredicates(c.PredicateFunc, predicate.GenerationChangedPredicate{})).
+		Watches(&corev1.Secret{}, handler.EnqueueRequestsFromMapFunc(c.clusterSecretMapFunc), builder.WithPredicates(secretPredicates)).
 		WithOptions(controller.Options{
 			RateLimiter: ratelimiterflag.DefaultControllerRateLimiter[controllerruntime.Request](c.RateLimiterOptions),
 		}).Complete(c)
+}
+
+// clusterSecretMapFunc maps a Secret update event to the Cluster that owns it.
+// Credential Secrets have an OwnerReference pointing to their Cluster (set during registration).
+// When the Secret is updated (e.g., token rotation), this function stops the stale informer managers
+// and enqueues the owning Cluster for reconciliation so that informers are rebuilt with fresh credentials.
+func (c *ClusterStatusController) clusterSecretMapFunc(_ context.Context, obj client.Object) []reconcile.Request {
+	var requests []reconcile.Request
+	for _, ownerRef := range obj.GetOwnerReferences() {
+		if ownerRef.APIVersion != clusterv1alpha1.GroupVersion.String() {
+			continue
+		}
+		if ownerRef.Kind != "Cluster" {
+			continue
+		}
+		klog.V(2).InfoS("Credential secret updated, rebuilding informer managers for cluster",
+			"secret", client.ObjectKeyFromObject(obj), "cluster", ownerRef.Name)
+		c.stopInformerManagerForCluster(ownerRef.Name)
+		requests = append(requests, reconcile.Request{
+			NamespacedName: types.NamespacedName{Name: ownerRef.Name},
+		})
+	}
+	return requests
+}
+
+// stopInformerManagerForCluster stops both the GenericInformerManager and the TypedInformerManager
+// for the given cluster. This cancels all active watches and removes the managers from the internal map,
+// allowing the next reconcile to recreate them with fresh credentials.
+func (c *ClusterStatusController) stopInformerManagerForCluster(clusterName string) {
+	c.GenericInformerManager.Stop(clusterName)
+	c.TypedInformerManager.Stop(clusterName)
 }
 
 func (c *ClusterStatusController) syncClusterStatus(ctx context.Context, cluster *clusterv1alpha1.Cluster) error {
@@ -346,6 +391,7 @@ func (c *ClusterStatusController) initializeGenericInformerManagerForCluster(clu
 		return
 	}
 	c.GenericInformerManager.ForCluster(clusterClient.ClusterName, dynamicClient.DynamicClientSet, 0)
+	klog.V(2).InfoS("Created generic informer manager with fresh credentials", "cluster", clusterClient.ClusterName)
 }
 
 // buildInformerForCluster builds informer manager for cluster if it doesn't exist, then constructs informers for node
@@ -354,6 +400,7 @@ func (c *ClusterStatusController) buildInformerForCluster(clusterClient *util.Cl
 	singleClusterInformerManager := c.TypedInformerManager.GetSingleClusterManager(clusterClient.ClusterName)
 	if singleClusterInformerManager == nil {
 		singleClusterInformerManager = c.TypedInformerManager.ForCluster(clusterClient.ClusterName, clusterClient.KubeClient, 0)
+		klog.V(2).InfoS("Created typed informer manager with fresh credentials", "cluster", clusterClient.ClusterName)
 	}
 
 	gvrs := []schema.GroupVersionResource{nodeGVR, podGVR}
