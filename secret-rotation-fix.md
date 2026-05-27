@@ -104,6 +104,274 @@ This does not self-heal.
 
 ---
 
+## Informer Manager Internals: Construction, Destruction, and Rebuild
+
+### Data Structures
+
+Karmada uses a two-level map structure to manage informers across all member clusters:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  MultiClusterInformerManager (singleton, shared across all controllers)      │
+│                                                                             │
+│  managers map[string]SingleClusterInformerManager                            │
+│  ┌───────────┬──────────────────────────────────────────────────────────┐   │
+│  │ "member1" │ → SingleClusterInformerManager { ctx, cancel, factory }  │   │
+│  │ "member2" │ → SingleClusterInformerManager { ctx, cancel, factory }  │   │
+│  │ "member3" │ → SingleClusterInformerManager { ctx, cancel, factory }  │   │
+│  └───────────┴──────────────────────────────────────────────────────────┘   │
+│                                                                             │
+│  lock sync.RWMutex  (protects the map)                                      │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+There are two of these singletons — one for Generic (dynamic) and one for Typed (kubernetes.Interface):
+
+**GenericInformerManager** (`genericmanager/multi-cluster-manager.go:84-88`):
+```go
+type multiClusterInformerManagerImpl struct {
+    managers map[string]SingleClusterInformerManager
+    ctx      context.Context
+    lock     sync.RWMutex
+}
+```
+
+**TypedInformerManager** (`typedmanager/multi-cluster-manager.go:92-97`):
+```go
+type multiClusterInformerManagerImpl struct {
+    managers       map[string]SingleClusterInformerManager
+    transformFuncs map[schema.GroupVersionResource]cache.TransformFunc
+    ctx            context.Context
+    lock           sync.RWMutex
+}
+```
+
+Each value in the `managers` map is a `SingleClusterInformerManager` — the object that owns all informers for one cluster:
+
+**Generic single-cluster manager** (`genericmanager/single-cluster-manager.go:89-102`):
+```go
+type singleClusterInformerManagerImpl struct {
+    ctx             context.Context
+    cancel          context.CancelFunc                              // kills all watches when called
+    informerFactory dynamicinformer.DynamicSharedInformerFactory    // creates and holds informers
+    syncedInformers map[schema.GroupVersionResource]struct{}        // which caches have synced
+    handlers        map[schema.GroupVersionResource][]cache.ResourceEventHandler
+    client          dynamic.Interface                               // ← embeds the bearer token
+    lock            sync.RWMutex
+}
+```
+
+**Typed single-cluster manager** (`typedmanager/single-cluster-manager.go:103-122`):
+```go
+type singleClusterInformerManagerImpl struct {
+    ctx              context.Context
+    cancel           context.CancelFunc
+    informerFactory  informers.SharedInformerFactory
+    syncedInformers  map[schema.GroupVersionResource]struct{}
+    informers        map[schema.GroupVersionResource]struct{}        // which resources have informers
+    startedInformers map[schema.GroupVersionResource]struct{}        // which have been started
+    handlers         map[schema.GroupVersionResource][]cache.ResourceEventHandler
+    transformFuncs   map[schema.GroupVersionResource]cache.TransformFunc  // strips pods/nodes to minimal fields
+    client           kubernetes.Interface                            // ← embeds the bearer token
+    lock             sync.RWMutex
+}
+```
+
+The `client` field is the critical piece — it's a Kubernetes client constructed with a **static bearer token** baked into the `rest.Config`. Every informer created by the factory inherits this client and uses it for its watch connections. When the token is rotated externally, this client becomes permanently unauthorized.
+
+### Normal Construction: What happens when a new cluster is registered
+
+When a new push-mode cluster is registered via `karmadactl join`, the following sequence occurs:
+
+```mermaid
+sequenceDiagram
+    participant Reg as karmadactl join
+    participant API as Karmada API Server
+    participant CSC as ClusterStatusController
+    participant GIM as GenericInformerManager
+    participant TIM as TypedInformerManager
+    participant Member as Member Cluster API
+
+    Note over Reg: Registration flow
+    Reg->>Member: Create ServiceAccount + ClusterRoleBinding
+    Member-->>Reg: Return SA token
+    Reg->>API: Create Secret (with token + CA, OwnerRef → Cluster)
+    Reg->>API: Create Cluster object
+
+    Note over CSC: First reconcile (within 10s)
+    API->>CSC: Reconcile("member1") triggered by Cluster creation
+    CSC->>API: Get Secret → read current token
+    CSC->>CSC: BuildClusterConfig() → rest.Config{BearerToken: token}
+    CSC->>Member: Health check (/readyz) → 200 OK
+    
+    Note over CSC: online=true, healthy=true, Ready=True
+    
+    CSC->>GIM: IsManagerExist("member1")
+    GIM-->>CSC: false (first time)
+    CSC->>API: ClusterDynamicClientSetFunc() → read Secret again → new dynamic.Interface
+    CSC->>GIM: ForCluster("member1", dynamicClient, 0)
+    
+    Note over GIM: Creates SingleClusterInformerManager
+    GIM->>GIM: ctx, cancel = context.WithCancel(parentCtx)
+    GIM->>GIM: factory = dynamicinformer.NewDynamicSharedInformerFactory(client, 0)
+    GIM->>GIM: managers["member1"] = newManager
+
+    CSC->>TIM: GetSingleClusterManager("member1")
+    TIM-->>CSC: nil (first time)
+    CSC->>TIM: ForCluster("member1", kubeClient, 0)
+    
+    Note over TIM: Creates SingleClusterInformerManager
+    TIM->>TIM: ctx, cancel = context.WithCancel(parentCtx)
+    TIM->>TIM: factory = informers.NewSharedInformerFactory(client, 0)
+    TIM->>TIM: managers["member1"] = newManager
+    
+    Note over CSC: Start informers
+    CSC->>TIM: Start("member1")
+    TIM->>TIM: factory.Start(ctx.Done()) → launches watch goroutines
+    TIM->>Member: Watch /api/v1/nodes (using baked-in token)
+    TIM->>Member: Watch /api/v1/pods (using baked-in token)
+    
+    CSC->>GIM: Start("member1")
+    Note over GIM: (Other controllers register GVRs and trigger Start later)
+```
+
+After this point, the managers **persist indefinitely**. On every subsequent reconcile (every 10 seconds), the controller hits the lazy initialization guard:
+
+```go
+// initializeGenericInformerManagerForCluster (line 383-384)
+if c.GenericInformerManager.IsManagerExist(clusterClient.ClusterName) {
+    return  // ← hits this on every cycle after the first
+}
+
+// buildInformerForCluster (line 400)
+singleClusterInformerManager := c.TypedInformerManager.GetSingleClusterManager(clusterClient.ClusterName)
+if singleClusterInformerManager == nil {  // ← not nil after first cycle
+    // only creates on first call
+}
+```
+
+The managers are never recreated unless something removes them from the map first.
+
+### Destruction: What `Stop()` does internally
+
+When `Stop("member1")` is called on the multi-cluster manager, three things happen in sequence:
+
+```mermaid
+sequenceDiagram
+    participant Caller as stopInformerManagerForCluster
+    participant MCM as MultiClusterInformerManager
+    participant SCM as SingleClusterInformerManager
+    participant Factory as SharedInformerFactory
+    participant Reflectors as Watch Goroutines
+    participant Member as Member Cluster API
+
+    Caller->>MCM: Stop("member1")
+    MCM->>MCM: manager = managers["member1"]
+    
+    Note over MCM: Step 1: Cancel the context
+    MCM->>SCM: manager.Stop()
+    SCM->>SCM: s.cancel()  // cancels the context
+    
+    Note over Factory: ctx.Done() channel closes
+    Factory->>Reflectors: All goroutines see ctx.Done()
+    Reflectors->>Member: Close watch HTTP connections
+    Reflectors->>Reflectors: Exit retry loops
+    Reflectors->>Reflectors: Goroutines return (no longer running)
+    
+    Note over MCM: Step 2: Remove from the map
+    MCM->>MCM: delete(managers, "member1")
+    
+    Note over MCM: Step 3: Garbage collection
+    Note over SCM: Nothing references the old manager anymore.<br/>The SingleClusterInformerManager, its factory,<br/>its informer caches, and the old client<br/>are all eligible for GC.
+```
+
+**In concrete code** (`genericmanager/multi-cluster-manager.go:132-141`):
+
+```go
+func (m *multiClusterInformerManagerImpl) Stop(cluster string) {
+    manager, exist := m.getManager(cluster)  // look up in the map
+    if !exist {
+        return
+    }
+    manager.Stop()           // → calls s.cancel() on the SingleClusterInformerManager
+    m.lock.Lock()
+    defer m.lock.Unlock()
+    delete(m.managers, cluster)  // remove the entry entirely
+}
+```
+
+**What `s.cancel()` triggers inside the SingleClusterInformerManager:**
+
+The `cancel()` function cancels the context that was passed to `informerFactory.Start(ctx.Done())`. Inside the factory, each informer runs a `Reflector` — a goroutine that:
+1. Does an initial `List` of all objects of a given type
+2. Opens a long-lived `Watch` connection (HTTP chunked/streaming)
+3. Processes events from the watch stream into the local cache
+4. On error (including 401 Unauthorized), retries with exponential backoff
+
+All of these goroutines select on `ctx.Done()`. When the context is cancelled:
+- Active HTTP watch connections are closed immediately
+- Retry loops exit instead of backing off and retrying
+- Event processor goroutines drain their queues and stop
+- The informer's in-memory store (a thread-safe map of all objects) becomes unreachable
+
+**What `delete(m.managers, cluster)` achieves:**
+
+This is what enables reconstruction. The lazy initialization guards check this map:
+- `IsManagerExist("member1")` → does a read-locked map lookup → returns `false`
+- `GetSingleClusterManager("member1")` → same lookup → returns `nil`
+
+With the entry gone, the next reconcile will take the "first time" path and create everything fresh.
+
+### Rebuild After Rotation: The full cycle
+
+```mermaid
+flowchart TD
+    A[Secret updated with new token] --> B[controller-runtime detects Secret update event]
+    B --> C[Predicate: UpdateFunc returns true]
+    C --> D[clusterSecretMapFunc called]
+    D --> E{OwnerRef has Kind=Cluster<br/>APIVersion=cluster.karmada.io/v1alpha1?}
+    E -->|No| F[Return empty — no reconcile]
+    E -->|Yes| G[stopInformerManagerForCluster]
+    
+    G --> H[GenericInformerManager.Stop]
+    H --> H1[cancel context → all dynamic watches die]
+    H1 --> H2[delete managers map entry]
+    
+    G --> I[TypedInformerManager.Stop]
+    I --> I1[cancel context → node/pod watches die]
+    I1 --> I2[delete managers map entry]
+    
+    H2 --> J[Enqueue Cluster for reconcile]
+    I2 --> J
+    
+    J --> K[syncClusterStatus runs]
+    K --> L[ClusterClientSetFunc → BuildClusterConfig<br/>reads NEW token from Secret]
+    L --> M[Health check with new token → passes]
+    M --> N{IsManagerExist?}
+    N -->|false| O[ClusterDynamicClientSetFunc<br/>→ new dynamic.Interface with NEW token]
+    O --> P[ForCluster → create new SingleClusterInformerManager<br/>→ insert into managers map]
+    
+    M --> Q{GetSingleClusterManager?}
+    Q -->|nil| R[ForCluster → create new typed manager<br/>→ insert into managers map]
+    R --> S[Start → launch new watch goroutines<br/>using new token]
+    S --> T[WaitForCacheSync → caches populate with fresh data]
+    T --> U[Informers fully operational with new credentials]
+```
+
+### Key insight: why cancellation is sufficient for cleanup
+
+You might wonder: why doesn't `Stop()` need to explicitly close each informer, drain event queues, or unregister handlers? The answer is Go's context-based cancellation pattern:
+
+1. **Goroutine lifecycle is tied to the context.** Every goroutine started by the informer factory selects on `ctx.Done()`. Cancelling the context is a single operation that simultaneously signals all goroutines to exit — no need to track and stop them individually.
+
+2. **HTTP connections are closed via context cancellation.** The `rest.Config` creates HTTP transports that respect context cancellation. When `ctx` is cancelled, any in-flight HTTP request (including the long-lived watch stream) is aborted.
+
+3. **Memory is reclaimed by garbage collection.** Once `delete(m.managers, cluster)` removes the only reference to the `SingleClusterInformerManager`, the entire object graph — factory, informers, caches, handlers, the old client with the stale token — becomes unreachable and will be collected by Go's GC.
+
+4. **The old manager cannot be restarted.** A cancelled context cannot be "uncancelled." This is by design — it forces the construction of a completely new manager with a fresh client, rather than attempting to reuse a partially-broken one.
+
+---
+
 ## Solution
 
 Add a Secret watch to the `ClusterStatusController`. When a credential Secret is updated:
