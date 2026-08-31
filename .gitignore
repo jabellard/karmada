@@ -20,6 +20,7 @@ prompt.md
 
 .idea/
 .vscode/
+.claude/
 
 # OSX trash
 .DS_Store
